@@ -1,0 +1,877 @@
+---
+title: "Interaction_analysis_Feb25"
+author: "Zulema Carracedo Lorenzo"
+date: "2025-02-24"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Load needed packages
+
+```{r}
+library(DESeq2)
+library(ggplot2)
+library(apeglm)
+library(glmGamPoi)
+library(dplyr)
+library(org.At.tair.db) #for functional enrichment
+library(venneuler)
+library(ashr)
+library(biomaRt) #for GO terms
+library(tidyverse)
+
+#For heatmap:
+library(pheatmap)
+library(RColorBrewer)
+library(grid)
+
+#For saving tables in .xlxs
+library("writexl")
+```
+
+#colors
+
+```{r}
+control <- #76CFE8
+WCS417 <- #C9DC53
+WCS315 <- #F99F58
+CHA0 <- #9771A5
+```
+
+
+#Data loading
+
+```{r}
+
+#Counts table
+dat <- read.table('./3_Arabidopsis_RNAseq_exp/data/salmon.merged.gene_counts.tsv', header=TRUE)
+# Use gene_id as row index
+rownames(dat) <- dat$gene_id
+# Remove explicit gene_id and gene_name columns
+countData <- subset(dat, select=-c(gene_id, gene_name)) 
+# Round to integer counts: salmon (as used in e.g. nf-core/rnaseq) provides floats.
+countData <- round(countData)
+head(countData)
+
+#metadata
+#Sample info should describe experimental conditions for each sample in a 
+#tabular format with samples as rows and variables as columns.
+colData<- read.table('./3_Arabidopsis_RNAseq_exp/data/metadata_organised.tsv', header=TRUE)
+# By default we treat everything as categorical, i.e. a factor
+#colData[, index] <- lapply(colData[, 1:ncol(colData)], as.factor) doesn't work
+colData$Treatment <- as.factor(colData$Treatment)
+colData$Time <- as.factor(colData$Time)
+colData$Pseudomonas <- as.factor(colData$Pseudomonas)
+# Use sample_id as row index
+rownames(colData) <- colData$Sample
+head(colData)
+str(colData)
+
+#The row names of the metadata (colData) should be in the same order than the column names of the counts tables (countData)
+
+rownames(colData)
+colnames(countData)
+identical((rownames(colData)), (colnames(countData))) #TRUE
+```
+
+#Subsetting input data 
+
+```{r}
+#For now we will only work with time point 1
+
+colData_tp1 <- filter(colData, Time == "1")  #only metadata TP1
+
+countData_tp1 <- dplyr::select(countData, colData_tp1$Sample) #only count table TP1
+
+identical((rownames(colData_tp1)), (colnames(countData_tp1))) #TRUE
+
+#Divide also for treatment
+#well-watered
+colData_tp1_ww <- filter(colData_tp1, Treatment == "well_watered")  #only metadata TP1 + ww
+
+countData_tp1_ww <- dplyr::select(countData_tp1, colData_tp1_ww$Sample) #only count table TP1 + ww
+
+identical((rownames(colData_tp1_ww)), (colnames(countData_tp1_ww))) #TRUE
+
+#Divide also for treatment
+#drought
+colData_tp1_dr <- filter(colData_tp1, Treatment == "drought")  #only metadata TP1 + dr
+
+countData_tp1_dr <- dplyr::select(countData_tp1, colData_tp1_dr$Sample) #only count table TP1 + dr
+
+identical((rownames(colData_tp1_dr)), (colnames(countData_tp1_dr))) #TRUE
+
+#For now we will only work with time point 2
+
+colData_tp2 <- filter(colData, Time == "2")  #only metadata TP2
+
+countData_tp2 <- dplyr::select(countData, colData_tp2$Sample) #only count table TP2
+
+identical((rownames(colData_tp2)), (colnames(countData_tp2))) #TRUE
+
+#Divide also for treatment
+#well-watered
+colData_tp2_ww <- filter(colData_tp2, Treatment == "well_watered")  #only metadata TP2 + ww
+
+countData_tp2_ww <- dplyr::select(countData_tp2, colData_tp2_ww$Sample) #only count table TP2 + ww
+
+identical((rownames(colData_tp2_ww)), (colnames(countData_tp2_ww))) #TRUE
+
+#Divide also for treatment
+#drought
+colData_tp2_dr <- filter(colData_tp2, Treatment == "drought")  #only metadata TP2 + dr
+
+countData_tp2_dr <- dplyr::select(countData_tp2, colData_tp2_dr$Sample) #only count table TP2 + dr
+
+identical((rownames(colData_tp2_dr)), (colnames(countData_tp2_dr))) #TRUE
+```
+
+# 1. Differential expression testing
+
+## WW + TP1
+```{r}
+
+#Create a DESeq2 Dataset Object
+dds_tp1_ww <- DESeqDataSetFromMatrix(countData = countData_tp1_ww,
+                              colData = colData_tp1_ww,
+                              design = ~ Pseudomonas)
+
+dds_tp1_ww$Pseudomonas <- relevel(dds_tp1_ww$Pseudomonas, "control")
+
+
+#Filter low count genes
+dds_tp1_ww <- dds_tp1_ww[rowSums(counts(dds_tp1_ww)) > 10, ]
+
+#Run DeSeq analysis
+dds_tp1_ww <- DESeq(dds_tp1_ww)
+
+#Extract results
+resultsNames(dds_tp1_ww)
+# [1] "Intercept"                     "Pseudomonas_CHA0_vs_control"   "Pseudomonas_WCS315_vs_control" "Pseudomonas_WCS417_vs_control"
+
+#as I want to make a heat map comparing all conditions:
+
+# Extract LFC for each condition
+#Use lfcShrink() to stabilize LFC estimates:
+res_WCS417_tp1_ww <- lfcShrink(dds_tp1_ww, coef = "Pseudomonas_WCS417_vs_control", type = "ashr")
+res_WCS315_tp1_ww <- lfcShrink(dds_tp1_ww, coef = "Pseudomonas_WCS315_vs_control", type = "ashr")
+res_CHA0_tp1_ww <- lfcShrink(dds_tp1_ww, coef = "Pseudomonas_CHA0_vs_control", type = "ashr")
+
+#save dds results
+save(dds_tp1_ww, file = "./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp1_ww.Rdata")
+load("./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp1_ww.Rdata")
+
+#save DESeq output tables for publication
+# Convert results to data frames
+df_WCS417_tp1_ww <- as.data.frame(res_WCS417_tp1_ww)
+df_WCS315_tp1_ww <- as.data.frame(res_WCS315_tp1_ww)
+df_CHA0_tp1_ww   <- as.data.frame(res_CHA0_tp1_ww)
+
+# Optionally, add gene names as a column if rownames contain gene IDs
+df_WCS417_tp1_ww$gene <- rownames(df_WCS417_tp1_ww)
+df_WCS315_tp1_ww$gene <- rownames(df_WCS315_tp1_ww)
+df_CHA0_tp1_ww$gene   <- rownames(df_CHA0_tp1_ww)
+
+# Reorder columns so 'gene' is first
+df_WCS417_tp1_ww <- df_WCS417_tp1_ww[, c("gene", setdiff(names(df_WCS417_tp1_ww), "gene"))]
+df_WCS315_tp1_ww <- df_WCS315_tp1_ww[, c("gene", setdiff(names(df_WCS315_tp1_ww), "gene"))]
+df_CHA0_tp1_ww   <- df_CHA0_tp1_ww[, c("gene", setdiff(names(df_CHA0_tp1_ww), "gene"))]
+                                   
+
+### save ###
+write_xlsx(df_WCS417_tp1_ww, path = "full_gene_list_WCS417_tp1_ww.xlsx")
+write_xlsx(df_WCS315_tp1_ww, path = "full_gene_list_WCS315_tp1_ww.xlsx")
+write_xlsx(df_CHA0_tp1_ww, path = "full_gene_list_CHA0_tp1_ww.xlsx")
+
+
+```
+
+## DR + TP1
+```{r}
+
+#Create a DESeq2 Dataset Object
+dds_tp1_dr <- DESeqDataSetFromMatrix(countData = countData_tp1_dr,
+                              colData = colData_tp1_dr,
+                              design = ~ Pseudomonas)
+
+dds_tp1_dr$Pseudomonas <- relevel(dds_tp1_dr$Pseudomonas, "control")
+
+
+#Filter low count genes
+dds_tp1_dr <- dds_tp1_dr[rowSums(counts(dds_tp1_dr)) > 10, ]
+
+#Run DeSeq analysis
+dds_tp1_dr <- DESeq(dds_tp1_dr)
+
+#Extract results
+resultsNames(dds_tp1_dr)
+# [1] "Intercept"                     "Pseudomonas_CHA0_vs_control"   "Pseudomonas_WCS315_vs_control" "Pseudomonas_WCS417_vs_control"
+
+#as I want to make a heat map comparing all conditions:
+
+# Extract LFC for each condition
+#Use lfcShrink() to stabilize LFC estimates:
+res_WCS417_tp1_dr <- lfcShrink(dds_tp1_dr, coef = "Pseudomonas_WCS417_vs_control", type = "ashr")
+res_WCS315_tp1_dr <- lfcShrink(dds_tp1_dr, coef = "Pseudomonas_WCS315_vs_control", type = "ashr")
+res_CHA0_tp1_dr <- lfcShrink(dds_tp1_dr, coef = "Pseudomonas_CHA0_vs_control", type = "ashr")
+
+#save dds results
+save(dds_tp1_dr, file = "./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp1_dr.Rdata")
+load("./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp1_dr.Rdata")
+
+#save DESeq output tables for publication
+# Convert results to data frames
+df_WCS417_tp1_dr <- as.data.frame(res_WCS417_tp1_dr)
+df_WCS315_tp1_dr <- as.data.frame(res_WCS315_tp1_dr)
+df_CHA0_tp1_dr   <- as.data.frame(res_CHA0_tp1_dr)
+
+# Optionally, add gene names as a column if rownames contain gene IDs
+df_WCS417_tp1_dr$gene <- rownames(df_WCS417_tp1_dr)
+df_WCS315_tp1_dr$gene <- rownames(df_WCS315_tp1_dr)
+df_CHA0_tp1_dr$gene   <- rownames(df_CHA0_tp1_dr)
+
+# Reorder columns so 'gene' is first
+df_WCS417_tp1_dr <- df_WCS417_tp1_dr[, c("gene", setdiff(names(df_WCS417_tp1_dr), "gene"))]
+df_WCS315_tp1_dr <- df_WCS315_tp1_dr[, c("gene", setdiff(names(df_WCS315_tp1_dr), "gene"))]
+df_CHA0_tp1_dr   <- df_CHA0_tp1_dr[, c("gene", setdiff(names(df_CHA0_tp1_dr), "gene"))]
+                                   
+### save###
+write_xlsx(df_WCS417_tp1_dr, path = "full_gene_list_WCS417_tp1_dr.xlsx")
+write_xlsx(df_WCS315_tp1_dr, path = "full_gene_list_WCS315_tp1_dr.xlsx")
+write_xlsx(df_CHA0_tp1_dr, path = "full_gene_list_CHA0_tp1_dr.xlsx")
+```
+
+## WW + TP2
+```{r}
+
+#Create a DESeq2 Dataset Object
+dds_tp2_ww <- DESeqDataSetFromMatrix(countData = countData_tp2_ww,
+                              colData = colData_tp2_ww,
+                              design = ~ Pseudomonas)
+
+dds_tp2_ww$Pseudomonas <- relevel(dds_tp2_ww$Pseudomonas, "control")
+
+
+#Filter low count genes
+dds_tp2_ww <- dds_tp2_ww[rowSums(counts(dds_tp2_ww)) > 10, ]
+
+#Run DeSeq analysis
+dds_tp2_ww <- DESeq(dds_tp2_ww)
+
+#Extract results
+resultsNames(dds_tp2_ww)
+# [1] "Intercept"                     "Pseudomonas_CHA0_vs_control"   "Pseudomonas_WCS315_vs_control" "Pseudomonas_WCS417_vs_control"
+
+#as I want to make a heat map comparing all conditions:
+
+# Extract LFC for each condition
+#Use lfcShrink() to stabilize LFC estimates:
+res_WCS417_tp2_ww <- lfcShrink(dds_tp2_ww, coef = "Pseudomonas_WCS417_vs_control", type = "ashr")
+res_WCS315_tp2_ww <- lfcShrink(dds_tp2_ww, coef = "Pseudomonas_WCS315_vs_control", type = "ashr")
+res_CHA0_tp2_ww <- lfcShrink(dds_tp2_ww, coef = "Pseudomonas_CHA0_vs_control", type = "ashr")
+
+#save dds results
+save(dds_tp2_ww, file = "./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp2_ww.Rdata")
+load("./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp2_ww.Rdata")
+
+#save DESeq output tables for publication
+# Convert results to data frames
+df_WCS417_tp2_ww <- as.data.frame(res_WCS417_tp2_ww)
+df_WCS315_tp2_ww <- as.data.frame(res_WCS315_tp2_ww)
+df_CHA0_tp2_ww   <- as.data.frame(res_CHA0_tp2_ww)
+
+# Optionally, add gene names as a column if rownames contain gene IDs
+df_WCS417_tp2_ww$gene <- rownames(df_WCS417_tp2_ww)
+df_WCS315_tp2_ww$gene <- rownames(df_WCS315_tp2_ww)
+df_CHA0_tp2_ww$gene   <- rownames(df_CHA0_tp2_ww)
+
+# Reorder columns so 'gene' is first
+df_WCS417_tp2_ww <- df_WCS417_tp2_ww[, c("gene", setdiff(names(df_WCS417_tp2_ww), "gene"))]
+df_WCS315_tp2_ww <- df_WCS315_tp2_ww[, c("gene", setdiff(names(df_WCS315_tp2_ww), "gene"))]
+df_CHA0_tp2_ww   <- df_CHA0_tp2_ww[, c("gene", setdiff(names(df_CHA0_tp2_ww), "gene"))]
+                                   
+### save ###
+write_xlsx(df_WCS417_tp2_ww, path = "full_gene_list_WCS417_tp2_ww.xlsx")
+write_xlsx(df_WCS315_tp2_ww, path = "full_gene_list_WCS315_tp2_ww.xlsx")
+write_xlsx(df_CHA0_tp2_ww, path = "full_gene_list_CHA0_tp2_ww.xlsx")
+```
+
+## DR + TP2
+```{r}
+
+#Create a DESeq2 Dataset Object
+dds_tp2_dr <- DESeqDataSetFromMatrix(countData = countData_tp2_dr,
+                              colData = colData_tp2_dr,
+                              design = ~ Pseudomonas)
+
+dds_tp2_dr$Pseudomonas <- relevel(dds_tp2_dr$Pseudomonas, "control")
+
+
+#Filter low count genes
+dds_tp2_dr <- dds_tp2_dr[rowSums(counts(dds_tp2_dr)) > 10, ]
+
+#Run DeSeq analysis
+dds_tp2_dr <- DESeq(dds_tp2_dr)
+
+#Extract results
+resultsNames(dds_tp2_dr)
+# [1] "Intercept"                     "Pseudomonas_CHA0_vs_control"   "Pseudomonas_WCS315_vs_control" "Pseudomonas_WCS417_vs_control"
+
+#as I want to make a heat map comparing all conditions:
+
+# Extract LFC for each condition
+#Use lfcShrink() to stabilize LFC estimates:
+res_WCS417_tp2_dr <- lfcShrink(dds_tp2_dr, coef = "Pseudomonas_WCS417_vs_control", type = "ashr")
+res_WCS315_tp2_dr <- lfcShrink(dds_tp2_dr, coef = "Pseudomonas_WCS315_vs_control", type = "ashr")
+res_CHA0_tp2_dr <- lfcShrink(dds_tp2_dr, coef = "Pseudomonas_CHA0_vs_control", type = "ashr")
+
+#save dds results
+save(dds_tp2_dr, file = "./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp2_dr.Rdata")
+load("./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp2_dr.Rdata")
+
+#save DESeq output tables for publication
+# Convert results to data frames
+df_WCS417_tp2_dr <- as.data.frame(res_WCS417_tp2_dr)
+df_WCS315_tp2_dr <- as.data.frame(res_WCS315_tp2_dr)
+df_CHA0_tp2_dr   <- as.data.frame(res_CHA0_tp2_dr)
+
+# Optionally, add gene names as a column if rownames contain gene IDs
+df_WCS417_tp2_dr$gene <- rownames(df_WCS417_tp2_dr)
+df_WCS315_tp2_dr$gene <- rownames(df_WCS315_tp2_dr)
+df_CHA0_tp2_dr$gene   <- rownames(df_CHA0_tp2_dr)
+
+# Reorder columns so 'gene' is first
+df_WCS417_tp2_dr <- df_WCS417_tp2_dr[, c("gene", setdiff(names(df_WCS417_tp2_dr), "gene"))]
+df_WCS315_tp2_dr <- df_WCS315_tp2_dr[, c("gene", setdiff(names(df_WCS315_tp2_dr), "gene"))]
+df_CHA0_tp2_dr   <- df_CHA0_tp2_dr[, c("gene", setdiff(names(df_CHA0_tp2_dr), "gene"))]
+                                   
+### save also output without cut off ###
+write_xlsx(df_WCS417_tp2_dr, path = "full_gene_list_WCS417_tp2_dr.xlsx")
+write_xlsx(df_WCS315_tp2_dr, path = "full_gene_list_WCS315_tp2_dr.xlsx")
+write_xlsx(df_CHA0_tp2_dr, path = "full_gene_list_CHA0_tp2_dr.xlsx")
+```
+
+
+# 2. Filter Significant Differentially Expressed Genes (DEGs)
+
+```{r}
+#If we take genes that are significant accross all conditions
+# Define threshold for significance (padj < 0.05 and |log2FC| > 2)
+sig_genes <- unique(c(
+  rownames(subset(res_WCS417_tp1_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_WCS315_tp1_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_CHA0_tp1_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_WCS417_tp1_dr, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_WCS315_tp1_dr, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_CHA0_tp1_dr, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_WCS417_tp2_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_WCS315_tp2_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_CHA0_tp2_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_WCS417_tp2_dr, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_WCS315_tp2_dr, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_CHA0_tp2_dr, padj < 0.05 & abs(log2FoldChange) > 2))
+))
+
+
+# Print the number of significant genes
+length(sig_genes) #191
+
+#as WCS315 has almost no significant genes, I could use only WCS417 and CHA0 for the heatmap 
+sig_genes2 <- unique(c(
+  rownames(subset(res_WCS417_tp1_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_CHA0_tp1_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_WCS417_tp1_dr, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_CHA0_tp1_dr, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_WCS417_tp2_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_CHA0_tp2_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_WCS417_tp2_dr, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_CHA0_tp2_dr, padj < 0.05 & abs(log2FoldChange) > 2))
+))
+
+# Print the number of significant genes
+length(sig_genes2) #191
+
+# Check if content is the same, ignoring order
+all.equal(sort(unlist(sig_genes)), sort(unlist(sig_genes2))) == TRUE #same set of genes
+```
+
+#3. Significant genes for venn diagrams
+
+```{r}
+
+# TP1 WW
+#UP
+up_WCs417_tp1_ww <-  rownames(subset(res_WCS417_tp1_ww, padj < 0.05 & log2FoldChange >= 2)) #25
+up_WCs315_tp1_ww <-  rownames(subset(res_WCS315_tp1_ww, padj < 0.05 & log2FoldChange >= 2)) #2
+up_CHA0_tp1_ww <-  rownames(subset(res_CHA0_tp1_ww, padj < 0.05 & log2FoldChange >= 2)) #24
+
+#DOWN
+down_WCs417_tp1_ww <-  rownames(subset(res_WCS417_tp1_ww, padj < 0.05 & log2FoldChange <= -2)) #23
+down_WCs315_tp1_ww <-  rownames(subset(res_WCS315_tp1_ww, padj < 0.05 & log2FoldChange <= -2)) #0
+down_CHA0_tp1_ww <-  rownames(subset(res_CHA0_tp1_ww, padj < 0.05 & log2FoldChange <= -2)) #75
+
+# TP1 DR
+#UP
+up_WCs417_tp1_dr <- rownames(subset(res_WCS417_tp1_dr, padj < 0.05 & log2FoldChange >= 2)) #13
+up_WCs315_tp1_dr <- rownames(subset(res_WCS315_tp1_dr, padj < 0.05 & log2FoldChange >= 2)) #1
+up_CHA0_tp1_dr <-  rownames(subset(res_CHA0_tp1_dr, padj < 0.05 & log2FoldChange >= 2)) #5
+
+#DOWN
+down_WCs417_tp1_dr <- rownames(subset(res_WCS417_tp1_dr, padj < 0.05 & log2FoldChange <= -2)) #6
+down_WCs315_tp1_dr <- rownames(subset(res_WCS315_tp1_dr, padj < 0.05 & log2FoldChange <= -2)) #1
+down_CHA0_tp1_dt <-  rownames(subset(res_CHA0_tp1_dr, padj < 0.05 & log2FoldChange <= -2)) #1
+
+# TP2 WW
+#UP
+up_WCs417_tp2_ww <-  rownames(subset(res_WCS417_tp2_ww, padj < 0.05 & log2FoldChange >= 2)) #4
+up_WCs315_tp2_ww <-  rownames(subset(res_WCS315_tp2_ww, padj < 0.05 & log2FoldChange >= 2)) #0
+up_CHA0_tp2_ww <-  rownames(subset(res_CHA0_tp2_ww, padj < 0.05 & log2FoldChange >= 2)) #9
+
+#DOWN
+down_WCs417_tp2_ww <-  rownames(subset(res_WCS417_tp2_ww, padj < 0.05 & log2FoldChange <= -2)) #7
+down_WCs315_tp2_ww <-  rownames(subset(res_WCS315_tp2_ww, padj < 0.05 & log2FoldChange <= -2)) #0
+down_CHA0_tp2_ww <-  rownames(subset(res_CHA0_tp2_ww, padj < 0.05 & log2FoldChange <= -2)) #37
+
+# TP2 DR
+#UP
+up_WCs417_tp2_dr <- rownames(subset(res_WCS417_tp2_dr, padj < 0.05 & log2FoldChange >= 2)) #55
+up_WCs315_tp2_dr <- rownames(subset(res_WCS315_tp2_dr, padj < 0.05 & log2FoldChange >= 2)) #2
+up_CHA0_tp2_dr <-  rownames(subset(res_CHA0_tp2_dr, padj < 0.05 & log2FoldChange >= 2)) #43
+
+#DOWN
+down_WCs417_tp2_dr <- rownames(subset(res_WCS417_tp2_dr, padj < 0.05 & log2FoldChange <= -2)) #30
+down_WCs315_tp2_dr <- rownames(subset(res_WCS315_tp2_dr, padj < 0.05 & log2FoldChange <= -2)) #3
+down_CHA0_tp2_dt <-  rownames(subset(res_CHA0_tp2_dr, padj < 0.05 & log2FoldChange <= -2)) #42
+
+```
+
+
+# 4. Create a Matrix for Heatmap
+
+```{r}
+# Create a data frame of log2 fold changes for each significant gene
+lfc_matrix <- data.frame(
+  control_vs_WCS417_ww_tp1 = res_WCS417_tp1_ww[match(sig_genes, rownames(res_WCS417_tp1_ww)), "log2FoldChange"],
+  control_vs_WCS315_ww_tp1 = res_WCS315_tp1_ww[match(sig_genes, rownames(res_WCS315_tp1_ww)), "log2FoldChange"],
+  control_vs_CHA0_ww_tp1 = res_CHA0_tp1_ww[match(sig_genes, rownames(res_CHA0_tp1_ww)), "log2FoldChange"],
+  control_vs_WCS417_dr_tp1 = res_WCS417_tp1_dr[match(sig_genes, rownames(res_WCS417_tp1_dr)), "log2FoldChange"],
+  control_vs_WCS315_dr_tp1 = res_WCS315_tp1_dr[match(sig_genes, rownames(res_WCS315_tp1_dr)), "log2FoldChange"],
+  control_vs_CHA0_dr_tp1 = res_CHA0_tp1_dr[match(sig_genes, rownames(res_CHA0_tp1_dr)), "log2FoldChange"],
+  control_vs_WCS417_ww_tp2 = res_WCS417_tp2_ww[match(sig_genes, rownames(res_WCS417_tp2_ww)), "log2FoldChange"],
+  control_vs_WCS315_ww_tp2 = res_WCS315_tp2_ww[match(sig_genes, rownames(res_WCS315_tp2_ww)), "log2FoldChange"],
+  control_vs_CHA0_ww_tp2 = res_CHA0_tp2_ww[match(sig_genes, rownames(res_CHA0_tp2_ww)), "log2FoldChange"],
+  control_vs_WCS417_dr_tp2 = res_WCS417_tp2_dr[match(sig_genes, rownames(res_WCS417_tp2_dr)), "log2FoldChange"],
+  control_vs_WCS315_dr_tp2 = res_WCS315_tp2_dr[match(sig_genes, rownames(res_WCS315_tp2_dr)), "log2FoldChange"],
+  control_vs_CHA0_dr_tp2 = res_CHA0_tp2_dr[match(sig_genes, rownames(res_CHA0_tp2_dr)), "log2FoldChange"]
+  
+)
+
+# Convert rownames to gene names
+rownames(lfc_matrix) <- sig_genes
+
+# Remove NA values (if any genes are missing in a specific comparison)
+lfc_matrix <- na.omit(lfc_matrix) #37
+
+
+#make matrix only containing WCS417 and CHA0
+
+# Create a data frame of log2 fold changes for each significant gene
+lfc_matrix2 <- data.frame(
+  control_vs_WCS417_ww_tp1 = res_WCS417_tp1_ww[match(sig_genes2, rownames(res_WCS417_tp1_ww)), "log2FoldChange"],
+  control_vs_CHA0_ww_tp1 = res_CHA0_tp1_ww[match(sig_genes2, rownames(res_CHA0_tp1_ww)), "log2FoldChange"],
+  control_vs_WCS417_dr_tp1 = res_WCS417_tp1_dr[match(sig_genes2, rownames(res_WCS417_tp1_dr)), "log2FoldChange"],
+  control_vs_CHA0_dr_tp1 = res_CHA0_tp1_dr[match(sig_genes2, rownames(res_CHA0_tp1_dr)), "log2FoldChange"],
+  control_vs_WCS417_ww_tp2 = res_WCS417_tp2_ww[match(sig_genes2, rownames(res_WCS417_tp2_ww)), "log2FoldChange"],
+  control_vs_CHA0_ww_tp2 = res_CHA0_tp2_ww[match(sig_genes2, rownames(res_CHA0_tp2_ww)), "log2FoldChange"],
+  control_vs_WCS417_dr_tp2 = res_WCS417_tp2_dr[match(sig_genes2, rownames(res_WCS417_tp2_dr)), "log2FoldChange"],
+  control_vs_CHA0_dr_tp2 = res_CHA0_tp2_dr[match(sig_genes2, rownames(res_CHA0_tp2_dr)), "log2FoldChange"]
+  
+)
+
+# Convert rownames to gene names
+rownames(lfc_matrix2) <- sig_genes2
+
+# Remove NA values (if any genes are missing in a specific comparison)
+lfc_matrix2 <- na.omit(lfc_matrix2) #37
+
+```
+
+#5. Get the GO terms from the gnes in our heatmap
+
+```{r}
+
+# Define the file path (update it based on where you saved the file)
+file_path <- "./3_Arabidopsis_RNAseq_exp/data/gene_association.tair.gz"  # Or provide the full path if needed
+
+# Read the GO annotation file, skipping comment lines (lines starting with '!')
+go_data <- read.table(gzfile(file_path), sep = "\t", header = FALSE, quote = "", comment.char = "!")
+
+# View the first few rows
+head(go_data)
+
+#select columns of interest
+go_data_filtered <- go_data %>%
+  dplyr::select(V2, V5, V9, V11) %>%
+  dplyr::rename(Gene_ID = V2, GO_Term = V5, GO_Description = V9, Evidence_Code = V11)
+
+
+# View the cleaned data
+head(go_data_filtered)
+
+#filter GO terms for my genes of interest
+
+# Pheatmap gene list
+gene_list <- rownames(lfc_matrix2
+                      )
+
+# Filter for specific genes
+go_results <- go_data_filtered %>% filter(Gene_ID %in% gene_list)
+
+#arrange order like in heatmap 
+go_results_ordered <- go_results %>%
+  mutate(Gene_ID = factor(Gene_ID, levels = rownames(lfc_matrix2))) %>%  # Convert to factor with custom order
+  arrange(Gene_ID)  # Arrange based on factor levels
+
+# View the result
+head(go_results_ordered)
+
+# View results
+print(go_results_ordered)
+#write.csv(go_results_ordered, "./results/GO_annotations_filtered_v2.csv", row.names = FALSE)
+
+
+#Split the content of V11 into different columns
+go_results_clean <- go_results %>%
+  separate(Evidence_Code, into = c("Evidence_1", "Evidence_2", "Evidence_3", "Evidence_4", "Evidence_5", "Evidence_6", "Evidence_7", "Evidence_8"), sep = "\\|", fill = "right")
+
+# View the result
+head(go_results_clean)
+
+
+#with this code I keep name of genes. To complicate to add automatically GO term to each gene. Will do manually 
+
+#Data frame with gene names
+
+# there is more than one raw per gene, we will keep only the first of each
+go_results_clean_unique <- go_results_clean %>%
+  distinct(Gene_ID, .keep_all = TRUE)  # Keep only unique Gene_IDs, and keep all columns
+
+head(go_results_clean_unique)
+
+
+#keep only column with gene names (Evidence_2)
+gene_names <- go_results_clean_unique %>%
+  dplyr::select(c("Gene_ID", "Evidence_2")) %>%
+  dplyr::rename(gene_name = Evidence_2)
+
+head(gene_names)
+
+
+```
+
+
+#6. Heatmap with gene names
+
+```{r}
+
+    #1. Take the genes that are significant at least for 1 condition
+
+#If we take genes that are significant accross all conditions
+# Define threshold for significance (padj < 0.05 and |log2FC| > 2)
+sig_genes2 <- unique(c(
+  rownames(subset(res_WCS417_tp1_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_CHA0_tp1_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_WCS417_tp1_dr, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_CHA0_tp1_dr, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_WCS417_tp2_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_CHA0_tp2_ww, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_WCS417_tp2_dr, padj < 0.05 & abs(log2FoldChange) > 2)),
+  rownames(subset(res_CHA0_tp2_dr, padj < 0.05 & abs(log2FoldChange) > 2))
+))
+
+   # 2. Make a matrix with the log2foldChange values and add genes names 
+# Create a data frame of log2 fold changes for each significant gene
+lfc_matrix2 <- data.frame(
+  control_vs_WCS417_ww_tp1 = res_WCS417_tp1_ww[match(sig_genes2, rownames(res_WCS417_tp1_ww)), "log2FoldChange"],
+  control_vs_CHA0_ww_tp1 = res_CHA0_tp1_ww[match(sig_genes2, rownames(res_CHA0_tp1_ww)), "log2FoldChange"],
+  control_vs_WCS417_dr_tp1 = res_WCS417_tp1_dr[match(sig_genes2, rownames(res_WCS417_tp1_dr)), "log2FoldChange"],
+  control_vs_CHA0_dr_tp1 = res_CHA0_tp1_dr[match(sig_genes2, rownames(res_CHA0_tp1_dr)), "log2FoldChange"],
+  control_vs_WCS417_ww_tp2 = res_WCS417_tp2_ww[match(sig_genes2, rownames(res_WCS417_tp2_ww)), "log2FoldChange"],
+  control_vs_CHA0_ww_tp2 = res_CHA0_tp2_ww[match(sig_genes2, rownames(res_CHA0_tp2_ww)), "log2FoldChange"],
+  control_vs_WCS417_dr_tp2 = res_WCS417_tp2_dr[match(sig_genes2, rownames(res_WCS417_tp2_dr)), "log2FoldChange"],
+  control_vs_CHA0_dr_tp2 = res_CHA0_tp2_dr[match(sig_genes2, rownames(res_CHA0_tp2_dr)), "log2FoldChange"]
+  
+)
+
+# Convert rownames to gene names
+rownames(lfc_matrix2) <- sig_genes2
+
+#check for NA values
+summary(lfc_matrix2)
+
+# Convert NA values into 0
+lfc_matrix2[is.na(lfc_matrix2)] <- 0
+
+#order the Gene_ID column in gene_names in the same order than in rownames lfc_matrix
+gene_names <- gene_names %>%
+  mutate(Gene_ID = factor(Gene_ID, levels = rownames(lfc_matrix2))) %>%  # Reorder by rownames of lfc_matrix
+  arrange(Gene_ID)
+
+#check
+head(gene_names)
+head(rownames(lfc_matrix2))
+
+# Create a combined label for row names: Gene_ID + gene_name
+lfc_matrix_rownames <- paste(rownames(lfc_matrix2), gene_names$gene_name[match(rownames(lfc_matrix2), gene_names$Gene_ID)], sep = " ")
+
+# Assign the new row names to lfc_matrix
+rownames(lfc_matrix2) <- lfc_matrix_rownames
+
+# View the updated row names
+head(rownames(lfc_matrix2))
+
+   # 3. Make a matrix with the padj values and add genes names 
+#make amatrix with the significance values
+
+padj_matrix2 <- data.frame(
+  control_vs_WCS417_ww_tp1 = res_WCS417_tp1_ww[match(sig_genes2, rownames(res_WCS417_tp1_ww)), "padj"],
+  control_vs_CHA0_ww_tp1 = res_CHA0_tp1_ww[match(sig_genes2, rownames(res_CHA0_tp1_ww)), 
+                                           "padj"],
+  control_vs_WCS417_dr_tp1 = res_WCS417_tp1_dr[match(sig_genes2, rownames(res_WCS417_tp1_dr)), "padj"],
+  control_vs_CHA0_dr_tp1 = res_CHA0_tp1_dr[match(sig_genes2, rownames(res_CHA0_tp1_dr)), 
+                                           "padj"],
+  control_vs_WCS417_ww_tp2 = res_WCS417_tp2_ww[match(sig_genes2, rownames(res_WCS417_tp2_ww)), "padj"],
+  control_vs_CHA0_ww_tp2 = res_CHA0_tp2_ww[match(sig_genes2, rownames(res_CHA0_tp2_ww)), 
+                                           "padj"],
+  control_vs_WCS417_dr_tp2 = res_WCS417_tp2_dr[match(sig_genes2, rownames(res_WCS417_tp2_dr)), "padj"],
+  control_vs_CHA0_dr_tp2 = res_CHA0_tp2_dr[match(sig_genes2, rownames(res_CHA0_tp2_dr)), 
+                                           "padj"]
+  
+)
+
+# Convert rownames to gene names
+rownames(padj_matrix2) <- sig_genes2
+
+#check for NA values
+summary(padj_matrix2)
+
+#convert significant values (<0.05) into 1, and not significan (>0.05) and NA into 0
+p_matrix2 <- padj_matrix2 %>%
+  mutate(across(everything(), ~ ifelse(is.na(.), 0, ifelse(. < 0.05, 1, 0))))
+
+#add gene names
+#order the Gene_ID column in gene_names in the same order than in rownames lfc_matrix
+gene_names <- gene_names %>%
+  mutate(Gene_ID = factor(Gene_ID, levels = rownames(p_matrix2))) %>%  # Reorder by rownames of lfc_matrix
+  arrange(Gene_ID)
+
+# Create a combined label for row names: Gene_ID + gene_name
+p_matrix_rownames <- paste(rownames(p_matrix2), gene_names$gene_name[match(rownames(p_matrix2), gene_names$Gene_ID)], sep = " ")
+
+# Assign the new row names to lfc_matrix
+rownames(p_matrix2) <- p_matrix_rownames
+
+# View the updated row names
+head(rownames(p_matrix2))
+
+
+
+#now make the pheatmap
+
+# Open the PDF graphics device
+
+pdf("pheatmap_WCC417&CHA0_scaled_row.pdf", width = 12, height = 18)
+
+
+pheatmap(lfc_matrix2, 
+         cluster_cols = TRUE, #cluster comparisons
+         cluster_rows = TRUE,  # Cluster genes
+        scale = "row", # Normalizes each gene (row) to highlight relative expression changes
+         clustering_distance_rows = "correlation", #Groups genes and samples based on expression patterns rather than absolute differences
+         clustering_method = "ward.D2", #Works well for hierarchical clustering, forming compact and well-separated clusters.
+          annotation_row = p_matrix2, #matrix with significant/not significant
+         color = colorRampPalette(c("blue", "white", "red"))(50),
+         main = "Differential Expression Heatmap (Z-score)",
+         fontsize_row = 6,  # Adjust font size for readability
+         fontsize_col = 10)  # Adjust font size for readability
+
+
+# Close the PDF device to save the file
+dev.off()
+
+# Open the PDF graphics device
+
+pdf("pheatmap_WCC417&CHA0_non-scaled.pdf", width = 12, height = 18)
+
+
+pheatmap(lfc_matrix2, 
+         cluster_cols = TRUE, #cluster comparisons
+         cluster_rows = TRUE,  # Cluster genes
+        scale = "none", # real lfc
+         clustering_distance_rows = "correlation", #Groups genes and samples based on expression patterns rather than absolute differences
+         clustering_method = "ward.D2", #Works well for hierarchical clustering, forming compact and well-separated clusters.
+          annotation_row = p_matrix2, #matrix with significant/not significant
+         color = colorRampPalette(c("blue", "white", "red"))(50),
+         main = "Differential Expression Heatmap (Z-score)",
+         fontsize_row = 6,  # Adjust font size for readability
+         fontsize_col = 10)  # Adjust font size for readability
+
+
+# Close the PDF device to save the file
+dev.off()
+
+#And if I adjust the clipping value to the data
+# Flatten the matrix to get all LFC values
+lfc_values <- as.vector(lfc_matrix2)
+
+# Remove NA values if any
+lfc_values <- lfc_values[!is.na(lfc_values)]
+
+# Choose the 95th percentile of absolute values
+clip_limit <- quantile(abs(lfc_values), 0.95)
+
+# Optional: round to a neat number
+clip_limit <- ceiling(clip_limit)
+
+# Clip matrix to this value
+lfc_clipped <- lfc_matrix2
+lfc_clipped[lfc_clipped > clip_limit] <- clip_limit
+lfc_clipped[lfc_clipped < -clip_limit] <- -clip_limit
+
+# Create symmetric breaks
+breaks <- seq(-clip_limit, clip_limit, length.out = 51)
+
+# Define color palette
+colors <- colorRampPalette(c("blue", "white", "red"))(length(breaks) - 1)
+
+# Define a custom order for the comparisons
+new_order <- c("control_vs_WCS417_ww_tp1", "control_vs_CHA0_ww_tp1", 
+               "control_vs_WCS417_ww_tp2", "control_vs_CHA0_ww_tp2",
+               "control_vs_WCS417_dr_tp1", "control_vs_CHA0_dr_tp1", 
+               "control_vs_WCS417_dr_tp2", "control_vs_CHA0_dr_tp2")
+
+# Reorder the columns in the matrix
+lfc_clipped <- lfc_clipped[, new_order]
+p_matrix2 <- p_matrix2[, new_order]
+
+
+# Open the PDF graphics device
+
+pdf("Fig.S2_pheatmap_RNAseq.pdf", width = 12, height = 18)
+
+# Plot
+pheatmap(lfc_clipped,
+         cluster_cols = FALSE,
+         cluster_rows = TRUE,
+         scale = "none",
+         clustering_distance_rows = "correlation",
+         clustering_method = "ward.D2",
+         annotation_row = p_matrix2,
+         color = colors,
+         breaks = breaks,
+         main = "Differential Expression Heatmap (Z-score)",
+         fontsize_row = 6,
+         fontsize_col = 10)
+
+# Close the PDF device to save the file
+dev.off()
+
+
+```
+
+#7. Checking expression of specific genes
+
+```{r}
+#do overall DESEQ2
+
+# Create a DESeq2 dataset
+dds <- DESeqDataSetFromMatrix(countData = countData, colData = colData, design = ~ Treatment + Pseudomonas + Time)
+
+# Normalize counts using DESeq2's built-in method
+dds <- estimateSizeFactors(dds)
+normalized_counts <- counts(dds, normalized = TRUE)  # Extract normalized counts
+
+# Variance-stabilizing transformation (better for visualization)
+vst_counts <- vst(dds)  # Apply VST
+rlog_counts <- rlog(dds)  # Alternative: Regularized Log Transformation
+
+# Convert to a dataframe for visualization
+normalized_df <- as.data.frame(assay(vst_counts))  # Use `rlog_counts` instead if preferred
+
+
+
+# Plot
+
+# Select a gene (change this for different genes)
+selected_gene <- "AT3G48740"  # Example gene
+
+# Extract expression values for the selected gene
+gene_expr <- normalized_df[selected_gene, , drop = FALSE]  # Keep as dataframe
+
+# Convert to long format for ggplot
+gene_expr_long <- as.data.frame(t(gene_expr)) %>%
+  tibble::rownames_to_column("Sample") %>%
+  dplyr::left_join(colData, by = "Sample") %>%
+  dplyr::rename(Expression = selected_gene)  # Rename expression column
+
+#calculate mean expression per condition
+
+gene_summary <- gene_expr_long %>%
+  group_by(Time, Treatment, Pseudomonas) %>%
+  summarise(
+    Mean_Expression = mean(Expression),
+    SD = sd(Expression),  # Standard Deviation
+    SE = SD / sqrt(n()),  # Standard Error
+    .groups = 'drop'
+  )
+
+#remove WCS315 data
+gene_summary2 <-  gene_summary %>%
+  filter(Pseudomonas != "WCS315")
+
+
+#plot mean expression over time
+
+gene_summary2$Pseudomonas <- factor(gene_summary2$Pseudomonas, c("control", "WCS417", "CHA0"))
+
+gene_summary2$Treatment <- factor(gene_summary2$Treatment, c("well_watered", "drought"))
+
+ggplot(gene_summary2, aes(x = factor(Time), y = Mean_Expression, 
+                         color = Pseudomonas, group = interaction(Pseudomonas, Treatment)))+
+scale_colour_manual(values = c("#76CFE8", "#C9DC53", "#9771A5")) +
+  geom_line(aes(linetype = Treatment), size = 1) +  
+  geom_point(size = 3) +  
+  geom_errorbar(aes(ymin = Mean_Expression - SE, ymax = Mean_Expression + SE), 
+                width = 0.2, linewidth = 0.7) +  # Add SD bars
+  scale_linetype_manual(values = c("well_watered" = "dashed", "drought" = "solid")) +  # Specify line styles
+  
+  labs(title = paste("Mean Expression of", selected_gene, "Over Time"),
+       x = "Timepoint", y = "Mean Normalized Expression",
+       color = "Pseudomonas", linetype = "Treatment") +
+  theme_minimal() +
+  theme(text = element_text(size = 14),
+          axis.line = element_line(colour = "black"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank()) 
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./3_Arabidopsis_RNAseq_exp/results/plots",
+  scale = 1.8,
+  width = 150,
+  height = 100,
+  units = "mm",
+  dpi = 300),
+x=c("Fig.2B_mean_exp_SE_SWEET11.svg","Fig.2B_mean_exp_SE_SWEET11.png"))
+
+```
+

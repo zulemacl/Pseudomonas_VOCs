@@ -1,0 +1,2333 @@
+---
+title: "RSA_day7"
+author: "Zulema Carracedo Lorenzo"
+date: "2025-02-07"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+#data management
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(stringr)
+library(readxl)
+library(flextable)
+
+#statistics
+library(multcompView)
+library(vegan)
+library(pairwiseAdonis)
+library(emmeans)
+library(DHARMa) #for simmulate residuals
+library(glmmTMB) #for glmm
+library(car)
+
+#plots
+library(ggplot2)
+library(ggpattern)
+library(rempsyc) #for tables
+library(fitdistrplus)
+
+# packages needed for Cohen's D
+library(effsize)  
+library(effectsize)
+library(lsr)
+
+```
+
+
+```{r}
+
+#Import data
+
+
+RSA_day7 <- readxl::read_xlsx("./4_Arabidopsis_mutants_exp/data/processed/RSA_day7_R.xlsx")
+RSA_day7 <- as.data.frame(RSA_day7)
+
+
+metadata <- readxl::read_xlsx("./4_Arabidopsis_mutants_exp/data/raw/metadata.xlsx")
+metadata <- as.data.frame(metadata)
+
+str(RSA_day7)
+
+str(metadata)
+
+
+RSA_day7[,1:4] <- lapply(RSA_day7[,1:4], as.factor)
+RSA_day7[,5:7] <- lapply(RSA_day7[,5:7], as.numeric)
+metadata[,1:4] <- lapply(metadata[,1:4], as.factor)
+
+
+
+#str(RSA) 
+#str(data) #ok
+
+
+
+#add metadata to RSA
+
+RSA_day7 <- merge(metadata, RSA_day7, by = "plate_id")
+
+
+```
+
+#Convert the pixel data to mm
+
+```{r}
+RSA_day7 <- RSA_day7 %>% mutate(Total_Length_mm = (Total_Length_px*0.0635))
+RSA_day7 <- RSA_day7 %>% mutate(Length_Primary_roots_mm = (Length_Primary_roots_px*0.0635))
+
+```
+
+
+#Arrange data for plots
+
+```{r}
+
+RSA_day7$media <- factor(RSA_day7$media, levels=c("control", "sorbitol"))
+RSA_day7$treatment <- factor(RSA_day7$treatment, levels=c("mock", "PsWCS417"))
+RSA_day7$genotype <- factor(RSA_day7$genotype, levels=c("col0", "bcat4", "snrk2.2/2.3", "sweet11/12"))
+
+
+```
+
+#Plots day 7
+
+```{r}
+##Primary root length
+
+ggplot(RSA_day7, aes(x = media, y = Length_Primary_roots_mm, fill = genotype, pattern = treatment)) +
+  scale_fill_manual(name = "genotype", values = c("#5AB4E5", "#00AEB2", "#F0E442", "#CC79A7")) +
+  geom_boxplot_pattern( position = position_dodge(preserve = "single"),
+                        color = "black", 
+                        pattern_fill = "black", 
+                        pattern_angle = 45, 
+                        pattern_density = 0.05, 
+                        pattern_spacing = 0.01,
+                        pattern_key_scale_factor = 0.6,
+                        outlier.shape = NA) +
+  scale_pattern_manual(values = c(PsWCS417 = "stripe", mock = "none")) +
+  guides(pattern = guide_legend(override.aes = list(fill = "white")), fill = guide_legend(override.aes = list(pattern = "none"))) +
+  ylab("Primary root length (mm)") +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(18) + 
+  theme(legend.position="top") +
+  labs(fill = "media", pattern = " ") +
+  guides(fill= FALSE) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(0, NA)) +  # Force y-axis to start at 0
+  facet_wrap(~genotype, nrow=1)
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./4_Arabidopsis_mutants_exp/results/plots",
+  scale = 1.8,
+  width = 150,
+  height = 100,
+  units = "mm",
+  dpi = 300),
+x=c("Fig.S3B_primary_length.svg","Fig.S3B_primary_length.png"))
+
+
+##lateral root count
+
+ggplot(RSA_day7, aes(x = media, y = Lateral_Root_Count, fill = genotype, pattern = treatment)) +
+  scale_fill_manual(name = "genotype", values = c("#5AB4E5", "#00AEB2", "#F0E442", "#CC79A7")) +
+  geom_boxplot_pattern( position = position_dodge(preserve = "single"),
+                        color = "black", 
+                        pattern_fill = "black", 
+                        pattern_angle = 45, 
+                        pattern_density = 0.05, 
+                        pattern_spacing = 0.01,
+                        pattern_key_scale_factor = 0.6,
+                        outlier.shape = NA) +
+  scale_pattern_manual(values = c(PsWCS417 = "stripe", mock = "none")) +
+  guides(pattern = guide_legend(override.aes = list(fill = "white")), fill = guide_legend(override.aes = list(pattern = "none"))) +
+  ylab("Lateral root count") +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(18) + 
+  theme(legend.position="top") +
+  labs(fill = "media", pattern = " ") +
+  guides(fill= FALSE) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(0, NA)) +  # Force y-axis to start at 0
+  facet_wrap(~genotype, nrow=1)
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./4_Arabidopsis_mutants_exp/results/plots",
+  scale = 1.8,
+  width = 150,
+  height = 100,
+  units = "mm",
+  dpi = 300),
+x=c("Fig.S3C_root_count.svg","Fig.S3C_root_count.png"))
+
+
+
+```
+
+
+
+#Calculating effect size 
+
+```{r}
+# Cohen's d
+
+
+# per genotype 4 df
+
+# For col-0
+data_C_Ps_col0 <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(treatment == "PsWCS417") %>%
+  filter(genotype == "col0")
+
+data_C_mock_col0 <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(treatment == "mock") %>%
+  filter(genotype == "col0")
+
+data_S_Ps_col0 <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(treatment == "PsWCS417") %>%
+  filter(genotype == "col0")
+
+data_S_mock_col0 <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(treatment == "mock") %>%
+  filter(genotype == "col0")
+
+#Now canculate Cohen's D with CI with effectsize package 
+ # for primary root length
+Cohens_prim_root_col0_C <- cohens_d(data_C_Ps_col0$Length_Primary_roots_mm,
+                                  data_C_mock_col0$Length_Primary_roots_mm, ci = 0.95)
+Cohens_prim_root_col0_C <- as.data.frame(Cohens_prim_root_col0_C)
+Cohens_prim_root_col0_C <- Cohens_prim_root_col0_C %>% mutate(genotype = "col0" ) %>% mutate(media = "control")
+
+Cohens_prim_root_col0_S <- cohens_d(data_S_Ps_col0$Length_Primary_roots_mm, data_S_mock_col0$Length_Primary_roots_mm, ci = 0.95)
+Cohens_prim_root_col0_S <- as.data.frame(Cohens_prim_root_col0_S)
+Cohens_prim_root_col0_S <- Cohens_prim_root_col0_S %>% mutate(genotype = "col0" ) %>% mutate(media = "sorbitol")
+
+
+ #for lateral root count
+
+Cohens_lat_count_col0_C <- cohens_d(data_C_Ps_col0$Lateral_Root_Count , data_C_mock_col0$Lateral_Root_Count, ci = 0.95)
+Cohens_lat_count_col0_C <- as.data.frame(Cohens_lat_count_col0_C)
+Cohens_lat_count_col0_C <- Cohens_lat_count_col0_C %>% mutate(genotype = "col0" ) %>% mutate(media = "control")
+
+Cohens_lat_count_col0_S <- cohens_d(data_S_Ps_col0$Lateral_Root_Count, data_S_mock_col0$Lateral_Root_Count, ci = 0.95)
+Cohens_lat_count_col0_S <- as.data.frame(Cohens_lat_count_col0_S)
+Cohens_lat_count_col0_S <- Cohens_lat_count_col0_S %>% mutate(genotype = "col0" ) %>% mutate(media = "sorbitol")
+
+# For bcat4
+data_C_Ps_bcat <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(treatment == "PsWCS417") %>%
+  filter(genotype == "bcat4")
+
+data_C_mock_bcat <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(treatment == "mock") %>%
+  filter(genotype == "bcat4")
+
+data_S_Ps_bcat <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(treatment == "PsWCS417") %>%
+  filter(genotype == "bcat4")
+
+data_S_mock_bcat <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(treatment == "mock") %>%
+  filter(genotype == "bcat4")
+
+#Now canculate Cohen's D with CI with effectsize package 
+
+#for primary root count
+Cohens_prim_root_bcat_C <- cohens_d(data_C_Ps_bcat$Length_Primary_roots_mm, data_C_mock_bcat$Length_Primary_roots_mm, ci = 0.95)
+Cohens_prim_root_bcat_C <- as.data.frame(Cohens_prim_root_bcat_C)
+Cohens_prim_root_bcat_C <- Cohens_prim_root_bcat_C %>% mutate(genotype = "bcat4" ) %>% mutate(media = "control")
+
+Cohens_prim_root_bcat_S <- cohens_d(data_S_Ps_bcat$Length_Primary_roots_mm, y =   data_S_mock_bcat$Length_Primary_roots_mm, ci = 0.95)
+Cohens_prim_root_bcat_S <- as.data.frame(Cohens_prim_root_bcat_S)
+Cohens_prim_root_bcat_S <- Cohens_prim_root_bcat_S %>% mutate(genotype = "bcat4" ) %>% mutate(media = "sorbitol")
+
+
+#for laterl root count
+Cohens_lat_count_bcat_C <- cohens_d(data_C_Ps_bcat$Lateral_Root_Count, data_C_mock_bcat$Lateral_Root_Count, ci = 0.95)
+Cohens_lat_count_bcat_C <- as.data.frame(Cohens_lat_count_bcat_C)
+Cohens_lat_count_bcat_C <- Cohens_lat_count_bcat_C %>% mutate(genotype = "bcat4" ) %>% mutate(media = "control")
+
+Cohens_lat_count_bcat_S <- cohens_d(data_S_Ps_bcat$Lateral_Root_Count, data_S_mock_bcat$Lateral_Root_Count, ci = 0.95)
+Cohens_lat_count_bcat_S <- as.data.frame(Cohens_lat_count_bcat_S)
+Cohens_lat_count_bcat_S <- Cohens_lat_count_bcat_S %>% mutate(genotype = "bcat4" ) %>% mutate(media = "sorbitol")
+
+# For snrk2.2/2.3
+data_C_Ps_snrk <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(treatment == "PsWCS417") %>%
+  filter(genotype == "snrk2.2/2.3")
+
+data_C_mock_snrk <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(treatment == "mock") %>%
+  filter(genotype == "snrk2.2/2.3")
+
+data_S_Ps_snrk <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(treatment == "PsWCS417") %>%
+  filter(genotype == "snrk2.2/2.3")
+
+data_S_mock_snrk <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(treatment == "mock") %>%
+  filter(genotype == "snrk2.2/2.3")
+
+#Now calculate Cohen's D with CI with effectsize package 
+#for primary root length
+Cohens_prim_root_snrk_C <- cohens_d(data_C_Ps_snrk$Length_Primary_roots_mm, data_C_mock_snrk$Length_Primary_roots_mm, ci = 0.95)
+Cohens_prim_root_snrk_C <- as.data.frame(Cohens_prim_root_snrk_C)
+Cohens_prim_root_snrk_C <- Cohens_prim_root_snrk_C %>% mutate(genotype = "snrk2.2/2.3" ) %>% mutate(media = "control")
+
+Cohens_prim_root_snrk_S <- cohens_d(data_S_Ps_snrk$Length_Primary_roots_mm, data_S_mock_snrk$Length_Primary_roots_mm, ci = 0.95)
+Cohens_prim_root_snrk_S <- as.data.frame(Cohens_prim_root_snrk_S)
+Cohens_prim_root_snrk_S <- Cohens_prim_root_snrk_S %>% mutate(genotype = "snrk2.2/2.3" ) %>% mutate(media = "sorbitol")
+
+#for lateral root count
+Cohens_lat_count_snrk_C <- cohens_d(data_C_Ps_snrk$Lateral_Root_Count, data_C_mock_snrk$Lateral_Root_Count, ci = 0.95)
+Cohens_lat_count_snrk_C <- as.data.frame(Cohens_lat_count_snrk_C)
+Cohens_lat_count_snrk_C <- Cohens_lat_count_snrk_C %>% mutate(genotype = "snrk2.2/2.3" ) %>% mutate(media = "control")
+
+Cohens_lat_count_snrk_S <- cohens_d(data_S_Ps_snrk$Lateral_Root_Count, data_S_mock_snrk$Lateral_Root_Count, ci = 0.95)
+Cohens_lat_count_snrk_S <- as.data.frame(Cohens_lat_count_snrk_S)
+Cohens_lat_count_snrk_S <- Cohens_lat_count_snrk_S %>% mutate(genotype = "snrk2.2/2.3" ) %>% mutate(media = "sorbitol")
+
+# For sweet11/12
+data_C_Ps_sweet <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(treatment == "PsWCS417") %>%
+  filter(genotype == "sweet11/12")
+
+data_C_mock_sweet <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(treatment == "mock") %>%
+  filter(genotype == "sweet11/12")
+
+data_S_Ps_sweet <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(treatment == "PsWCS417") %>%
+  filter(genotype == "sweet11/12")
+
+data_S_mock_sweet <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(treatment == "mock") %>%
+  filter(genotype == "sweet11/12")
+
+#Now canculate Cohen's D with CI with effectsize package 
+#for primary root
+Cohens_prim_root_sweet_C <- cohens_d(data_C_Ps_sweet$Length_Primary_roots_mm , data_C_mock_sweet$Length_Primary_roots_mm, ci = 0.95)
+Cohens_prim_root_sweet_C <- as.data.frame(Cohens_prim_root_sweet_C)
+Cohens_prim_root_sweet_C <- Cohens_prim_root_sweet_C %>% mutate(genotype = "sweet11/12" ) %>% mutate(media = "control")
+
+Cohens_prim_root_sweet_S <- cohens_d(data_S_Ps_sweet$Length_Primary_roots_mm, data_S_mock_sweet$Length_Primary_roots_mm, ci = 0.95)
+Cohens_prim_root_sweet_S <- as.data.frame(Cohens_prim_root_sweet_S)
+Cohens_prim_root_sweet_S <- Cohens_prim_root_sweet_S %>% mutate(genotype = "sweet11/12" ) %>% mutate(media = "sorbitol")
+
+#for lateral root number
+Cohens_lat_count_sweet_C <- cohens_d(data_C_Ps_sweet$Lateral_Root_Count, data_C_mock_sweet$Lateral_Root_Count, ci = 0.95)
+Cohens_lat_count_sweet_C <- as.data.frame(Cohens_lat_count_sweet_C)
+Cohens_lat_count_sweet_C <- Cohens_lat_count_sweet_C %>% mutate(genotype = "sweet11/12" ) %>% mutate(media = "control")
+
+Cohens_lat_count_sweet_S <- cohens_d(data_S_Ps_sweet$Lateral_Root_Count, data_S_mock_sweet$Lateral_Root_Count, ci = 0.95)
+Cohens_lat_count_sweet_S <- as.data.frame(Cohens_lat_count_sweet_S)
+Cohens_lat_count_sweet_S <- Cohens_lat_count_sweet_S %>% mutate(genotype = "sweet11/12" ) %>% mutate(media = "sorbitol")
+
+# make a df with all the Cohen's D results
+
+cohens_prim_root_df <- rbind(Cohens_prim_root_col0_C, Cohens_prim_root_col0_S, Cohens_prim_root_bcat_C, Cohens_prim_root_bcat_S, Cohens_prim_root_snrk_C, Cohens_prim_root_snrk_S, Cohens_prim_root_sweet_C, Cohens_prim_root_sweet_S)
+
+cohens_lat_count_df <- rbind(Cohens_lat_count_col0_C, Cohens_lat_count_col0_S, Cohens_lat_count_bcat_C, Cohens_lat_count_bcat_S, Cohens_lat_count_snrk_C, Cohens_lat_count_snrk_S, Cohens_lat_count_sweet_C, Cohens_lat_count_sweet_S)
+
+#plot
+
+#arrange data first
+cohens_prim_root_df$media <- factor(cohens_prim_root_df$media, levels=c("sorbitol","control"))
+cohens_prim_root_df$genotype <- factor(cohens_prim_root_df$genotype, levels=c("sweet11/12", "snrk2.2/2.3", "bcat4", "col0"))
+
+#Primary root length
+
+ggplot(cohens_prim_root_df, aes(x=genotype, y=Cohens_d, ymin=CI_low, ymax=CI_high, col=genotype,fill=genotype, shape = media)) + 
+  scale_fill_manual(name = "genotype", values = c("#5AB4E5", "#00AEB2", "#F0E442", "#CC79A7")) +
+  scale_color_manual(name = "genotype", values = c("#5AB4E5", "#00AEB2", "#F0E442", "#CC79A7")) +
+  geom_hline(aes(yintercept=0), lty=2, linewidth = 1, colour= "red") +
+      geom_pointrange(position = position_dodge(0.3), size = 1, linewidth = 1.5) +
+      ggtitle("Primary root length") +
+      xlab("Genotype") +
+      scale_y_continuous(name="Cohen's D estimate with 95% confidence interval", limits = c(-1,3)) +
+      coord_flip() +
+      theme_bw(18) 
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./4_Arabidopsis_mutants_exp/results/plots",
+  scale = 1.8,
+  width = 150,
+  height = 100,
+  units = "mm",
+  dpi = 300),
+x=c("Fig.3_Cohens_primary_length.svg","Fig.3_Cohens_primary_length.png"))
+
+
+
+
+#Lateral root count
+
+#arrange data first
+cohens_lat_count_df$media <- factor(cohens_lat_count_df$media, levels=c("sorbitol","control"))
+cohens_lat_count_df$genotype <- factor(cohens_lat_count_df$genotype, levels=c("sweet11/12", "snrk2.2/2.3", "bcat4", "col0"))
+
+#Shoot RSA_day7
+
+ggplot(cohens_lat_count_df, aes(x=genotype, y=Cohens_d, ymin=CI_low, ymax=CI_high, col=genotype,fill=genotype, shape = media)) + 
+  scale_fill_manual(name = "genotype", values = c("#5AB4E5", "#00AEB2", "#F0E442", "#CC79A7")) +
+  scale_color_manual(name = "genotype", values = c("#5AB4E5", "#00AEB2", "#F0E442", "#CC79A7")) +
+  geom_hline(aes(yintercept=0), lty=2, linewidth = 1, colour= "red") +
+      geom_pointrange(position = position_dodge(0.3), size = 1, linewidth = 1.5) +
+      ggtitle("Lateral root count") +
+      xlab("Genotype") +
+      scale_y_continuous(name="Cohen's D estimate with 95% confidence interval", limits = c(-1,3.5)) +
+      coord_flip() +
+      theme_bw(18) 
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./4_Arabidopsis_mutants_exp/results/plots",
+  scale = 1.8,
+  width = 150,
+  height = 100,
+  units = "mm",
+  dpi = 300),
+x=c("Fig.3_Cohens_root_count.svg","Fig.3_Cohens_root_count.png"))
+                                
+```
+
+
+#Statistics - GLM
+#day7
+##Primary root length
+### Col-0
+
+
+```{r}
+# col-0 in 1/2MS
+
+data_C_col0 <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(genotype == "col0")
+
+# Data distribution
+
+aovx <- aov(data_C_col0$Length_Primary_roots_mm ~ data_C_col0$treatment)
+shapiro.test(aovx$residuals)
+# not normaal
+
+hist(data_C_col0$Length_Primary_roots_mm)
+
+boxplot(data_C_col0$Length_Primary_roots_mm)
+
+# Visualize data
+plotdist(log(data_C_col0$Length_Primary_roots_mm))
+
+# Test the different distributions
+normal <- fitdist(data_C_col0$Length_Primary_roots_mm, "norm")
+summary(normal)
+
+gamma <- fitdist(data_C_col0$Length_Primary_roots_mm, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_C_col0$Length_Primary_roots_mm, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_C_col0$Length_Primary_roots_mm, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_C_col0$Length_Primary_roots_mm, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_C_col0$Length_Primary_roots_mm, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_C_col0$Length_Primary_roots_mm, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: logis
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(Length_Primary_roots_mm ~ treatment + (1|plate_id), 
+                 data=data_C_col0, na.action=na.omit,
+                 family = gaussian(link = "identity"))
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_primary_length_col0_control.docx")
+
+
+# col-0 in sobitol
+
+data_S_col0 <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(genotype == "col0")
+
+# Data distribution
+
+aovx <- aov(data_S_col0$Length_Primary_roots_mm ~ data_S_col0$treatment)
+shapiro.test(aovx$residuals)
+# normaal
+
+hist(data_S_col0$Length_Primary_roots_mm)
+
+boxplot(data_S_col0$Length_Primary_roots_mm)
+
+# Visualize data
+plotdist(log(data_S_col0$Length_Primary_roots_mm))
+
+# Test the different distributions
+normal <- fitdist(data_S_col0$Length_Primary_roots_mm, "norm")
+summary(normal)
+
+gamma <- fitdist(data_S_col0$Length_Primary_roots_mm, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_S_col0$Length_Primary_roots_mm, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_S_col0$Length_Primary_roots_mm, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_S_col0$Length_Primary_roots_mm, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_S_col0$Length_Primary_roots_mm, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_S_col0$Length_Primary_roots_mm, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: normal
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(log(Length_Primary_roots_mm) ~ treatment + (1|plate_id), 
+                 data=data_S_col0, na.action=na.omit,
+                 family = gaussian())
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_primary_length_col0_sorbitol.docx")
+
+
+
+```
+
+###Bcat-4
+
+```{r}
+# bcat-4 in 1/2MS
+
+data_C_bcat4 <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(genotype == "bcat4")
+
+# Data distribution
+
+aovx <- aov(data_C_bcat4$Length_Primary_roots_mm ~ data_C_bcat4$treatment)
+shapiro.test(aovx$residuals)
+# not normaal
+
+hist(data_C_bcat4$Length_Primary_roots_mm)
+
+boxplot(data_C_bcat4$Length_Primary_roots_mm)
+
+# Visualize data
+plotdist(log(data_C_bcat4$Length_Primary_roots_mm))
+
+# Test the different distributions
+normal <- fitdist(data_C_bcat4$Length_Primary_roots_mm, "norm")
+summary(normal)
+
+gamma <- fitdist(data_C_bcat4$Length_Primary_roots_mm, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_C_bcat4$Length_Primary_roots_mm, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_C_bcat4$Length_Primary_roots_mm, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_C_bcat4$Length_Primary_roots_mm, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_C_bcat4$Length_Primary_roots_mm, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_C_bcat4$Length_Primary_roots_mm, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: logis
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(Length_Primary_roots_mm ~ treatment + (1|plate_id), 
+                 data=data_C_bcat4, na.action=na.omit,
+                 family = gaussian(link = "identity"))
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_primary_length_bcat_control.docx")
+
+
+
+# bcat-4 in sobitol
+
+data_S_bcat4 <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(genotype == "bcat4")
+
+# Data distribution
+
+aovx <- aov(data_S_bcat4$Length_Primary_roots_mm ~ data_S_bcat4$treatment)
+shapiro.test(aovx$residuals)
+# normaal
+
+hist(data_S_bcat4$Length_Primary_roots_mm)
+
+boxplot(data_S_bcat4$Length_Primary_roots_mm)
+
+# Visualize data
+plotdist(log(data_S_bcat4$Length_Primary_roots_mm))
+
+# Test the different distributions
+normal <- fitdist(data_S_bcat4$Length_Primary_roots_mm, "norm")
+summary(normal)
+
+gamma <- fitdist(data_S_bcat4$Length_Primary_roots_mm, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_S_bcat4$Length_Primary_roots_mm, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_S_bcat4$Length_Primary_roots_mm, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_S_bcat4$Length_Primary_roots_mm, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_S_bcat4$Length_Primary_roots_mm, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_S_bcat4$Length_Primary_roots_mm, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: normal
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(Length_Primary_roots_mm ~ treatment + (1|plate_id), 
+                 data = data_S_bcat4, na.action = na.omit,
+                 family = gaussian())  
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_primary_length_bcat_sorbitol.docx")
+
+```
+
+###snrk2.2/2.3
+
+```{r}
+# snrk2.2/2.3. in 1/2MS
+
+data_C_snrk <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(genotype == "snrk2.2/2.3")
+
+# Data distribution
+
+aovx <- aov(data_C_snrk$Length_Primary_roots_mm ~ data_C_snrk$treatment)
+shapiro.test(aovx$residuals)
+# normaal
+
+hist(data_C_snrk$Length_Primary_roots_mm)
+
+boxplot(data_C_snrk$Length_Primary_roots_mm)
+
+# Visualize data
+plotdist(log(data_C_snrk$Length_Primary_roots_mm))
+
+# Test the different distributions
+normal <- fitdist(data_C_snrk$Length_Primary_roots_mm, "norm")
+summary(normal)
+
+gamma <- fitdist(data_C_snrk$Length_Primary_roots_mm, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_C_snrk$Length_Primary_roots_mm, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_C_snrk$Length_Primary_roots_mm, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_C_snrk$Length_Primary_roots_mm, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_C_snrk$Length_Primary_roots_mm, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_C_snrk$Length_Primary_roots_mm, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: normal
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(Length_Primary_roots_mm ~ treatment + (1|plate_id), 
+                 data=data_C_snrk, na.action=na.omit,
+                 family = gaussian())
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_primary_length_snrk_control.docx")
+
+
+
+# snrk2.2/2.3. in sobitol
+
+data_S_snrk <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(genotype == "snrk2.2/2.3")
+
+# Data distribution
+
+aovx <- aov(data_S_snrk$Length_Primary_roots_mm ~ data_S_snrk$treatment)
+shapiro.test(aovx$residuals)
+# not normal
+
+hist(data_S_snrk$Length_Primary_roots_mm)
+
+boxplot(data_S_snrk$Length_Primary_roots_mm)
+
+# Visualize data
+plotdist(log(data_S_snrk$Length_Primary_roots_mm))
+
+# Test the different distributions
+normal <- fitdist(data_S_snrk$Length_Primary_roots_mm, "norm")
+summary(normal)
+
+gamma <- fitdist(data_S_snrk$Length_Primary_roots_mm, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_S_snrk$Length_Primary_roots_mm, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_S_snrk$Length_Primary_roots_mm, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_S_snrk$Length_Primary_roots_mm, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_S_snrk$Length_Primary_roots_mm, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_S_snrk$Length_Primary_roots_mm, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: logis 
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(Length_Primary_roots_mm ~ treatment + (1|plate_id), 
+                 data = data_S_snrk, na.action = na.omit,
+                 family = gaussian(link = "identity"))  # Gaussian as an approximation
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_primary_length_snrk_sorbitol.docx")
+
+```
+
+###sweet11/12
+
+```{r}
+# sweet11/12 in 1/2MS
+
+data_C_sweet <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(genotype == "sweet11/12")
+
+# Data distribution
+
+aovx <- aov(data_C_sweet$Length_Primary_roots_mm ~ data_C_sweet$treatment)
+shapiro.test(aovx$residuals)
+# normal
+
+hist(data_C_sweet$Length_Primary_roots_mm)
+
+boxplot(data_C_sweet$Length_Primary_roots_mm)
+
+# Visualize data
+plotdist(log(data_C_sweet$Length_Primary_roots_mm))
+
+# Test the different distributions
+normal <- fitdist(data_C_sweet$Length_Primary_roots_mm, "norm")
+summary(normal)
+
+gamma <- fitdist(data_C_sweet$Length_Primary_roots_mm, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_C_sweet$Length_Primary_roots_mm, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_C_sweet$Length_Primary_roots_mm, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_C_sweet$Length_Primary_roots_mm, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_C_sweet$Length_Primary_roots_mm, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_C_sweet$Length_Primary_roots_mm, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: logis
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(Length_Primary_roots_mm ~ treatment + (1|plate_id), 
+                 data=data_C_sweet, na.action=na.omit,
+                 family = gaussian(link = "identity"))
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_primary_length_sweet_control.docx")
+
+
+
+# sweet11/12 in sobitol
+
+data_S_sweet <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(genotype == "sweet11/12")
+
+# Data distribution
+
+aovx <- aov(data_S_sweet$Length_Primary_roots_mm ~ data_S_sweet$treatment)
+shapiro.test(aovx$residuals)
+# normal
+
+hist(data_S_sweet$Length_Primary_roots_mm)
+
+boxplot(data_S_sweet$Length_Primary_roots_mm)
+
+# Visualize data
+plotdist(log(data_S_sweet$Length_Primary_roots_mm))
+
+# Test the different distributions
+normal <- fitdist(data_S_sweet$Length_Primary_roots_mm, "norm")
+summary(normal)
+
+gamma <- fitdist(data_S_sweet$Length_Primary_roots_mm, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_S_sweet$Length_Primary_roots_mm, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_S_sweet$Length_Primary_roots_mm, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_S_sweet$Length_Primary_roots_mm, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_S_sweet$Length_Primary_roots_mm, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_S_sweet$Length_Primary_roots_mm, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion:  logis
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(Length_Primary_roots_mm ~ treatment + (1|plate_id), 
+                 data = data_S_sweet, na.action = na.omit,
+                 family = gaussian(link = "identity"))  # Gaussian as an approximation
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_primary_length_sweet_sorbitol.docx")
+
+```
+
+
+
+##Lateral root count
+### Col-0
+
+
+```{r}
+# col-0 in 1/2MS
+
+data_C_col0 <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(genotype == "col0")
+
+# Data distribution
+
+aovx <- aov(data_C_col0$Lateral_Root_Count ~ data_C_col0$treatment)
+shapiro.test(aovx$residuals)
+# normal
+
+hist(data_C_col0$Lateral_Root_Count )
+
+boxplot(data_C_col0$Lateral_Root_Count)
+
+# Visualize data
+plotdist(log(data_C_col0$Lateral_Root_Count))
+
+# Test the different distributions
+normal <- fitdist(data_C_col0$Lateral_Root_Count, "norm")
+summary(normal)
+
+gamma <- fitdist(data_C_col0$Lateral_Root_Count, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_C_col0$Lateral_Root_Count, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_C_col0$Lateral_Root_Count, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_C_col0$Lateral_Root_Count, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_C_col0$Lateral_Root_Count, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_C_col0$Lateral_Root_Count, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: logis
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(Lateral_Root_Count ~ treatment + (1|plate_id), 
+                 data=data_C_col0, na.action=na.omit,
+                 family = gaussian(link = "identity"))
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_lateral_count_col0_control.docx")
+
+
+
+# col-0 in sobitol
+
+data_S_col0 <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(genotype == "col0")
+
+# Data distribution
+
+aovx <- aov(data_S_col0$Lateral_Root_Count ~ data_S_col0$treatment)
+shapiro.test(aovx$residuals)
+#normal
+
+hist(data_S_col0$Lateral_Root_Count)
+
+boxplot(data_S_col0$Lateral_Root_Count)
+
+# Visualize data
+plotdist(log(data_S_col0$Lateral_Root_Count))
+
+# Test the different distributions
+normal <- fitdist(data_S_col0$Lateral_Root_Count, "norm")
+summary(normal)
+
+gamma <- fitdist(data_S_col0$Lateral_Root_Count, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_S_col0$Lateral_Root_Count, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_S_col0$Lateral_Root_Count, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_S_col0$Lateral_Root_Count, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_S_col0$Lateral_Root_Count, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_S_col0$Lateral_Root_Count, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: lnormal (normal and logis and gamma-> KS test significant)
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(log(Lateral_Root_Count) ~ treatment + (1|plate_id), 
+                 data=data_S_col0, na.action=na.omit,
+                 family = gaussian())  #####all models test give me significant KS
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_lateral_count_col0_sorbitol.docx")
+
+
+
+```
+
+###Bcat-4
+
+```{r}
+# bcat-4 in 1/2MS
+
+data_C_bcat4 <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(genotype == "bcat4")
+
+# Data distribution
+
+aovx <- aov(data_C_bcat4$Lateral_Root_Count ~ data_C_bcat4$treatment)
+shapiro.test(aovx$residuals)
+# not normaal
+
+hist(data_C_bcat4$Lateral_Root_Count)
+
+boxplot(data_C_bcat4$Lateral_Root_Count)
+
+# Visualize data
+plotdist(log(data_C_bcat4$Lateral_Root_Count))
+
+# Test the different distributions
+normal <- fitdist(data_C_bcat4$Lateral_Root_Count, "norm")
+summary(normal)
+
+gamma <- fitdist(data_C_bcat4$Lateral_Root_Count, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_C_bcat4$Lateral_Root_Count, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_C_bcat4$Lateral_Root_Count, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_C_bcat4$Lateral_Root_Count, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_C_bcat4$Lateral_Root_Count, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_C_bcat4$Lateral_Root_Count, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: normal
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(Lateral_Root_Count ~ treatment + (1|plate_id), 
+                 data=data_C_bcat4, na.action=na.omit,
+                 family = gaussian())
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_lateral_count_bcat_control.docx")
+
+
+
+# bcat-4 in sobitol
+
+data_S_bcat4 <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(genotype == "bcat4")
+
+# Data distribution
+
+aovx <- aov(data_S_bcat4$Lateral_Root_Count ~ data_S_bcat4$treatment)
+shapiro.test(aovx$residuals)
+#not normaal
+
+hist(data_S_bcat4$Lateral_Root_Count)
+
+boxplot(data_S_bcat4$Lateral_Root_Count)
+
+# Visualize data
+plotdist(log(data_S_bcat4$Lateral_Root_Count))
+
+# Test the different distributions
+normal <- fitdist(data_S_bcat4$Lateral_Root_Count, "norm")
+summary(normal)
+
+gamma <- fitdist(data_S_bcat4$Lateral_Root_Count, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_S_bcat4$Lateral_Root_Count, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_S_bcat4$Lateral_Root_Count, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_S_bcat4$Lateral_Root_Count, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_S_bcat4$Lateral_Root_Count, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_S_bcat4$Lateral_Root_Count, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: normal
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(Lateral_Root_Count ~ treatment + (1|plate_id), 
+                 data = data_S_bcat4, na.action = na.omit,
+                 family = gaussian())  
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_lateral_count_bcat_sorbitol.docx")
+
+```
+
+###snrk2.2/2.3
+
+```{r}
+# snrk2.2/2.3. in 1/2MS
+
+data_C_snrk <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(genotype == "snrk2.2/2.3")
+
+# Data distribution
+
+aovx <- aov(data_C_snrk$Lateral_Root_Count ~ data_C_snrk$treatment)
+shapiro.test(aovx$residuals)
+#normal
+
+hist(data_C_snrk$Lateral_Root_Count)
+
+boxplot(data_C_snrk$Lateral_Root_Count)
+
+# Visualize data
+plotdist(log(data_C_snrk$Lateral_Root_Count))
+
+# Test the different distributions
+normal <- fitdist(data_C_snrk$Lateral_Root_Count, "norm")
+summary(normal)
+
+gamma <- fitdist(data_C_snrk$Lateral_Root_Count, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_C_snrk$Lateral_Root_Count, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_C_snrk$Lateral_Root_Count, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_C_snrk$Lateral_Root_Count, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_C_snrk$Lateral_Root_Count, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_C_snrk$Lateral_Root_Count, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: normal
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(Lateral_Root_Count ~ treatment + (1|plate_id), 
+                 data=data_C_snrk, na.action=na.omit,
+                 family = gaussian())
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_lateral_count_snrk_control.docx")
+
+
+
+# snrk2.2/2.3. in sobitol
+
+data_S_snrk <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(genotype == "snrk2.2/2.3")
+
+# Data distribution
+
+aovx <- aov(data_S_snrk$Lateral_Root_Count ~ data_S_snrk$treatment)
+shapiro.test(aovx$residuals)
+# normaal
+
+hist(data_S_snrk$Lateral_Root_Count)
+
+boxplot(data_S_snrk$Lateral_Root_Count)
+
+# Visualize data
+plotdist(log(data_S_snrk$Lateral_Root_Count))
+
+# Test the different distributions
+normal <- fitdist(data_S_snrk$Lateral_Root_Count, "norm")
+summary(normal)
+
+gamma <- fitdist(data_S_snrk$Lateral_Root_Count, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_S_snrk$Lateral_Root_Count, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_S_snrk$Lateral_Root_Count, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_S_snrk$Lateral_Root_Count, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_S_snrk$Lateral_Root_Count, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_S_snrk$Lateral_Root_Count, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: normal 
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(Lateral_Root_Count ~ treatment + (1|plate_id), 
+                 data = data_S_snrk, na.action = na.omit,
+                 family = gaussian())  # Gaussian as an approximation
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_lateral_count_snrk_sorbitol.docx")
+
+```
+
+###sweet11/12
+
+```{r}
+# sweet11/12 in 1/2MS
+
+data_C_sweet <- RSA_day7 %>%
+  filter(media == "control") %>%
+  filter(genotype == "sweet11/12")
+
+# Data distribution
+
+aovx <- aov(data_C_sweet$Lateral_Root_Count ~ data_C_sweet$treatment)
+shapiro.test(aovx$residuals)
+#not normaal
+
+hist(data_C_sweet$Lateral_Root_Count)
+
+boxplot(data_C_sweet$Lateral_Root_Count)
+
+# Visualize data
+plotdist(log(data_C_sweet$Lateral_Root_Count))
+
+# Test the different distributions
+normal <- fitdist(data_C_sweet$Lateral_Root_Count, "norm")
+summary(normal)
+
+gamma <- fitdist(data_C_sweet$Lateral_Root_Count, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_C_sweet$Lateral_Root_Count, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_C_sweet$Lateral_Root_Count, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_C_sweet$Lateral_Root_Count, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_C_sweet$Lateral_Root_Count, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_C_sweet$Lateral_Root_Count, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: normal
+
+###### Generalized linear mixed modelst
+
+lmmx <- glmmTMB(Lateral_Root_Count ~ treatment + (1|plate_id), 
+                 data=data_C_sweet, na.action=na.omit,
+                 family = gaussian())
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_lateral_count_sweet_control.docx")
+
+
+# sweet11/12 in sobitol
+
+data_S_sweet <- RSA_day7 %>%
+  filter(media == "sorbitol") %>%
+  filter(genotype == "sweet11/12")
+
+# Data distribution
+
+aovx <- aov(data_S_sweet$Lateral_Root_Count ~ data_S_sweet$treatment)
+shapiro.test(aovx$residuals)
+# normaal
+
+hist(data_S_sweet$Lateral_Root_Count)
+
+boxplot(data_S_sweet$Lateral_Root_Count)
+
+# Visualize data
+plotdist(log(data_S_sweet$Lateral_Root_Count))
+
+# Test the different distributions
+normal <- fitdist(data_S_sweet$Lateral_Root_Count, "norm")
+summary(normal)
+
+gamma <- fitdist(data_S_sweet$Lateral_Root_Count, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_S_sweet$Lateral_Root_Count, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_S_sweet$Lateral_Root_Count, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_S_sweet$Lateral_Root_Count, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_S_sweet$Lateral_Root_Count, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_S_sweet$Lateral_Root_Count, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion:  normal
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(Lateral_Root_Count ~ treatment + (1|plate_id), 
+                 data = data_S_sweet, na.action = na.omit,
+                 family = gaussian())  # Gaussian as an approximation
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+## Anova summary
+glmm_table <- Anova(lmmx,type="II")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+anova_df$`Pr(>Chisq)` <- ifelse(
+  anova_df$`Pr(>Chisq)` < 0.001,
+  "<0.001",
+  formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3)
+)
+
+# Add significance codes
+anova_df$Significance <- cut(
+  anova_df$`Pr(>Chisq)`,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+  labels = c("***", "**", "*", ".", " "),
+  right = FALSE
+)
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)", "Significance")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table X. Type II ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft)
+
+# Save to Word document
+
+print(doc, target = "AnovaII_lateral_count_sweet_sorbitol.docx")
+
+```
+
+

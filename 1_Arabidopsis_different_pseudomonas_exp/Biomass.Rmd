@@ -1,0 +1,430 @@
+---
+title: "Biomass"
+author: "Zulema Carracedo Lorenzo"
+date: "2025-03-06"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#data management
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(stringr)
+library(readxl)
+
+#statistics
+library(multcompView)
+library(psych) #for summary table
+library(DHARMa)
+library(emmeans)
+library(glmmTMB) # for generalized mixed models
+library(car) # for Anova
+
+
+#plots
+library(ggplot2)
+library(ggpattern)
+library(Hmisc)
+library(fitdistrplus)
+
+# packages needed for Cohen's D
+library(effsize)  
+library(effectsize)
+library(lsr)
+
+#for tables
+library(flextable)
+library(officer)
+library(car)
+library(emmeans)
+library(multcomp)
+
+```
+
+#Load data
+```{r}
+
+#Import data
+
+biomass <- readxl::read_xlsx("./1_Arabidopsis_different_pseudomonas_exp/data/processed/biomass_R.xlsx")
+biomass <- as.data.frame(biomass)
+
+
+biomass[,1:3] <- lapply(biomass[,1:3], as.factor)
+str(biomass)
+```
+
+#Arrange data 
+
+```{r}
+
+biomass$media <- factor(biomass$media, levels=c("control", "sorbitol"))
+biomass$treatment <- factor(biomass$treatment, levels=c("Ctrl", "WCS417", "WCS315", "CHA0"))
+
+
+```
+
+#Add new colums
+
+```{r}
+
+biomass <- biomass %>% mutate(shoot_biomass_seedling_mg = Av_shoot_weight*1000)
+
+biomass <- biomass %>% mutate(total_biomass_seedling_mg = Av_total_weight*1000)
+
+biomass <- biomass %>% mutate(root_biomass_seedling_mg = Av_root_weight*1000)
+
+summary(biomass)  
+
+```
+
+
+#colors
+
+```{r}
+control <- #76CFE8
+WCS417 <- #C9DC53
+WCS315 <- #F99F58
+CHA0 <- #9771A5
+```
+
+
+#Plots
+
+```{r}
+
+#Total fresh biomass
+
+ggplot(biomass, aes(x = treatment, y = total_biomass_seedling_mg, fill = treatment)) +
+  scale_fill_manual(name = "treatment", values = c("#76CFE8", "#C9DC53", "#F99F58", "#9771A5")) +
+  ylab("Total FW (mg)") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(18) + 
+  theme(legend.position="top") +
+  guides(fill= FALSE) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(0, NA)) +  # Force y-axis to start at 0
+  facet_wrap(~media, nrow=1)
+
+#save it
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./1_Arabidopsis_different_pseudomonas_exp/results/plots",
+  scale = 1.8,
+  width = 150,
+  height = 100,
+  units = "mm",
+  dpi = 300),
+x=c("Fig.1A_Total_FW.svg","Fig.1A_Total_FW.png"))
+
+
+
+```
+
+
+#Statistics
+
+##Total biomass
+### Control
+
+
+```{r}
+# col-0 in 1/2MS
+
+data_control <- biomass %>%
+  filter(media == "control")
+
+# Data distribution
+
+aovx <- aov(data_control$total_biomass_seedling_mg ~ data_control$treatment)
+shapiro.test(aovx$residuals)
+# not normaal
+
+hist(data_control$total_biomass_seedling_mg)
+
+boxplot(data_control$total_biomass_seedling_mg)
+
+# Visualize data
+plotdist(log(data_control$total_biomass_seedling_mg))
+
+# Test the different distributions
+normal <- fitdist(data_control$total_biomass_seedling_mg, "norm")
+summary(normal)
+
+gamma <- fitdist(data_control$total_biomass_seedling_mg, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_control$total_biomass_seedling_mg, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_control$total_biomass_seedling_mg, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_control$total_biomass_seedling_mg, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_control$total_biomass_seedling_mg, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_control$total_biomass_seedling_mg, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: normal
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(total_biomass_seedling_mg ~ treatment + (1|plate_id), 
+                 data=data_control, na.action=na.omit,
+                 family = gaussian(link = "log"))
+
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx)) #DHARMa: qgam was unable to calculate quantile regression for quantile 0.25. Possibly to few (unique) data points / predictions. The quantile will be ommited in plots and significance calculations. 
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+# Perform Type III ANOVA
+glmm_table <- Anova(lmmx, type = "III")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+
+# Round p-values and format small values (<0.001)
+anova_df$`Pr(>Chisq)` <- round(as.numeric(as.character(anova_df$`Pr(>Chisq)`)), 3)  # round to 3 decimals
+anova_df$`Pr(>Chisq)` <- ifelse(anova_df$`Pr(>Chisq)` < 0.001, "< 0.001", formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3))
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Post-hoc / pairwise comparisons using emmeans
+emmeans_result <- emmeans(lmmx, pairwise ~ treatment, adjust = "tukey")
+emmeans_df <- as.data.frame(emmeans_result$contrasts)
+
+# Pairwise comparisons flextable
+pairwise_ft <- flextable(emmeans_df) |>
+  colformat_double(j = c("estimate", "SE", "t.ratio", "p.value"), digits = 3) |>
+  set_header_labels(
+    contrast = "Contrast", estimate = "Estimate", SE = "SE",
+    df = "DF", t.ratio = "t-ratio", p.value = "p-value"
+  ) |>
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ p.value < 0.05, part = "body")
+
+# CLD result
+cld_result <- multcomp::cld(emmeans_result, adjust = "sidak", Letters = letters)
+cld_df <- as.data.frame(cld_result)
+
+# Compact letter display (CLD) flextable
+cld_ft <- flextable(cld_df) |>
+  colformat_double(j = "emmean", digits = 2) |>
+  set_header_labels(
+    treatment = "Treatment", emmean = "Estimated Mean", .group = "Group"
+  ) |>
+  autofit() |>
+  theme_booktabs()
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table 1. Type III ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft) |>
+  
+  body_add_par("Table 2. Pairwise Comparisons (Tukey)", style = "heading 2") |>
+  body_add_flextable(pairwise_ft) |>
+  
+  body_add_par("Table 3. Compact Letter Display (CLD)", style = "heading 2") |>
+  body_add_flextable(cld_ft)
+
+# Save to Word document
+
+print(doc, target = "model_results_tot_biomass_control.docx")
+
+```
+
+### Sorbitol
+
+
+```{r}
+
+data_sorbitol <- biomass %>%
+  filter(media == "sorbitol")
+
+# Data distribution
+
+aovx <- aov(data_control$total_biomass_seedling_mg ~ data_sorbitol$treatment)
+shapiro.test(aovx$residuals)
+# not normaal
+
+hist(data_sorbitol$total_biomass_seedling_mg)
+
+boxplot(data_sorbitol$total_biomass_seedling_mg)
+
+# Visualize data
+plotdist(log(data_sorbitol$total_biomass_seedling_mg))
+
+# Test the different distributions
+normal <- fitdist(data_sorbitol$total_biomass_seedling_mg, "norm")
+summary(normal)
+
+gamma <- fitdist(data_sorbitol$total_biomass_seedling_mg, "gamma") 
+summary(gamma)
+
+poisson <- fitdist(data_sorbitol$total_biomass_seedling_mg, "pois")
+summary(poisson)
+
+exponential <- fitdist(data_sorbitol$total_biomass_seedling_mg, "exp")
+summary(exponential)
+
+nonbinom <- fitdist(data_sorbitol$total_biomass_seedling_mg, "nbinom")
+summary(nonbinom)
+
+lnormal <- fitdist(data_sorbitol$total_biomass_seedling_mg, "lnorm")
+summary(lnormal)
+
+logi <- fitdist(data_sorbitol$total_biomass_seedling_mg, "logis")
+summary(logi)
+
+# Compare the different distributions
+gofstat(list(normal, exponential, gamma, lnormal, logi), 
+        fitnames=c("normal", "exponential", "gamma", "lnormal", "logis"))
+
+# conclusion: normal
+
+###### Generalized linear mixed models
+
+lmmx <- glmmTMB(total_biomass_seedling_mg ~ treatment + (1|plate_id), 
+                 data=data_sorbitol, na.action=na.omit,
+                 family = gaussian(link = "log"))
+plot(resid(lmmx))
+plot(simulateResiduals(lmmx))  
+
+# Res Identification for batch
+res <-simulateResiduals(lmmx, plot = T) # check for overdispersion
+testResiduals(res) # tests distribution, dispersion and outliers, testUniformity() - tests if the overall distribution conforms to expectations
+testDispersion(res) # tests under and overdispersion (big spread in data, red bar is way off of distribution of data (res))
+testZeroInflation(res)
+testOutliers(res, type = 'bootstrap')
+
+# Results
+
+summary(lmmx) # final model 
+
+# Perform Type III ANOVA
+glmm_table <- Anova(lmmx, type = "III")
+
+# Convert to dataframe and add factor names
+anova_df <- as.data.frame(glmm_table)
+anova_df$Factor <- rownames(anova_df)
+
+# Round Chi-sq and p-value columns
+anova_df$Chisq <- round(anova_df$Chisq, 2)
+
+# Round p-values and format small values (<0.001)
+anova_df$`Pr(>Chisq)` <- round(as.numeric(as.character(anova_df$`Pr(>Chisq)`)), 3)  # round to 3 decimals
+anova_df$`Pr(>Chisq)` <- ifelse(anova_df$`Pr(>Chisq)` < 0.001, "< 0.001", formatC(anova_df$`Pr(>Chisq)`, format = "f", digits = 3))
+
+# Reorder columns: Factor first
+anova_df <- anova_df[, c("Factor", "Chisq", "Df", "Pr(>Chisq)")]
+
+# Create flextable (no need for p_numeric in conditional formatting)
+anova_ft <- flextable(anova_df) |> 
+  set_header_labels(
+    Factor = "Factor",
+    Chisq = "Chi²",
+    Df = "DF",
+    `Pr(>Chisq)` = "p-value"
+  ) |> 
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ as.numeric(as.character(`Pr(>Chisq)`)) < 0.05, part = "body")
+
+# Post-hoc / pairwise comparisons using emmeans
+emmeans_result <- emmeans(lmmx, pairwise ~ treatment, adjust = "tukey")
+emmeans_df <- as.data.frame(emmeans_result$contrasts)
+
+# Pairwise comparisons flextable
+pairwise_ft <- flextable(emmeans_df) |>
+  colformat_double(j = c("estimate", "SE", "t.ratio", "p.value"), digits = 3) |>
+  set_header_labels(
+    contrast = "Contrast", estimate = "Estimate", SE = "SE",
+    df = "DF", t.ratio = "t-ratio", p.value = "p-value"
+  ) |>
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ p.value < 0.05, part = "body")
+
+# CLD result
+cld_result <- multcomp::cld(emmeans_result, adjust = "sidak", Letters = letters)
+cld_df <- as.data.frame(cld_result)
+
+# Compact letter display (CLD) flextable
+cld_ft <- flextable(cld_df) |>
+  colformat_double(j = "emmean", digits = 2) |>
+  set_header_labels(
+    treatment = "Treatment", emmean = "Estimated Mean", .group = "Group"
+  ) |>
+  autofit() |>
+  theme_booktabs()
+
+# Export stats table to Word document
+doc <- read_docx() |>
+  body_add_par("Table 1. Type III ANOVA Results", style = "heading 2") |>
+  body_add_flextable(anova_ft) |>
+  
+  body_add_par("Table 2. Pairwise Comparisons (Tukey)", style = "heading 2") |>
+  body_add_flextable(pairwise_ft) |>
+  
+  body_add_par("Table 3. Compact Letter Display (CLD)", style = "heading 2") |>
+  body_add_flextable(cld_ft)
+
+# Save to Word document
+print(doc, target = "model_results_tot_biomass_sorbitol.docx")
+
+
+
+```
+

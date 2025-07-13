@@ -1,0 +1,308 @@
+---
+title: "PCA"
+author: "Zulema Carracedo Lorenzo"
+date: "2023-06-05"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Load needed packages
+
+```{r}
+library(DESeq2)
+library(ggplot2)
+library(apeglm)
+library(glmGamPoi)
+library(dplyr)
+library(org.At.tair.db) #for functional enrichment
+
+#for permanova
+library(vegan)
+library(pairwiseAdonis)
+
+#tables
+library(flextable)
+library(officer)
+
+```
+
+#Data loading
+
+```{r}
+#Counts table
+dat <- read.table('3_Arabidopsis_RNAseq_exp/data/salmon.merged.gene_counts.tsv', header=TRUE)
+# Use gene_id as row index
+rownames(dat) <- dat$gene_id
+# Remove explicit gene_id and gene_name columns
+countData <- subset(dat, select=-c(gene_id, gene_name)) 
+# Round to integer counts: salmon (as used in e.g. nf-core/rnaseq) provides floats.
+countData <- round(countData)
+head(countData)
+
+#metadata
+#Sample info should describe experimental conditions for each sample in a 
+#tabular format with samples as rows and variables as columns.
+colData<- read.table('3_Arabidopsis_RNAseq_exp/data/metadata_organised.tsv', header=TRUE)
+# By default we treat everything as categorical, i.e. a factor
+#colData[, index] <- lapply(colData[, 1:ncol(colData)], as.factor) doesn't work
+colData$Treatment <- as.factor(colData$Treatment)
+colData$Time <- as.factor(colData$Time)
+colData$Pseudomonas <- as.factor(colData$Pseudomonas)
+# Use sample_id as row index
+rownames(colData) <- colData$Sample
+head(colData)
+str(colData)
+
+#Subset data by timepoint
+colData_tp1 <- filter(colData, Time == "1")  #only metadata TP1
+countData_tp1 <- select(countData, colData_tp1$Sample) #only count table TP1
+
+colData_tp2 <- filter(colData, Time == "2")  #only metadata TP2
+countData_tp2 <- dplyr::select(countData, colData_tp2$Sample) #only count table TP2
+
+```
+
+
+
+# 1. Differential expression testing
+### LRT based testing
+
+Create DESeq2 object, specify a full and reduced model, perform likelihood ratio test (LRT). For simple experiments (i.e. treatment VS control) this is the same as testing for a difference in means. For a more complex experiment (i.e. three genotypes and two timepoints), this is like doing an ANOVA.
+
+
+```{r}
+# Create DESeq2 object and specify full model
+dds <- DESeqDataSetFromMatrix(
+  countData = countData,
+  colData = colData,
+  design = ~ Pseudomonas + Time + Treatment
+)
+
+dds$Treatment <- relevel(dds$Treatment, "well_watered")
+
+dds$Pseudomonas <- relevel(dds$Pseudomonas, "control")
+
+# Perform LRT with reduced model
+dds <- DESeq(
+  dds,
+  reduced = ~ Time,
+  test = 'LRT',
+  fitType = 'glmGamPoi'
+)
+
+# Scaled counts by DESeq2 size factor (will be used later for e.g. plotting)
+scaledCountData <- as.data.frame(mapply('/', countData, dds$sizeFactor))
+rownames(scaledCountData) <- rownames(countData)
+
+# Select significant genes
+alpha_cutoff <- 0.05
+res <- results(dds, tidy = TRUE, alpha = alpha_cutoff)
+selection <- res$padj < alpha_cutoff
+selection[is.na(selection)] <- FALSE # Zero-expression genes will have NAs, do not select
+sig <- res[selection, ]
+
+# Sort by adjusted p-value
+sig <- sig[order(sig$padj),]
+sig
+```
+
+
+### PCA on DESeq2 normalized counts
+
+This uses a variance stabilizing transformation: either `rlog` or `vst`.
+Use `rlog` for small to medium sized experiments, and `vst` for big experiments (Or wait a long time). 
+
+```{r}
+#PCA on DESeq2 normalized counts
+
+PCA <-plotPCA(
+  rlog(dds, blind=FALSE, fitType='glmGamPoi'),
+  intgroup=c('Pseudomonas','Treatment', 'Time'),
+  returnData=TRUE)
+
+percentVar <- round(100 * attr(PCA, "percentVar"))
+
+PCA$Pseudomonas <- factor(PCA$Pseudomonas, c("control", "WCS417", "WCS315", "CHA0"))
+
+  ggplot(PCA, aes(PC1, PC2, fill=Pseudomonas, shape=Treatment, color = Time)) +
+  geom_point(size=8) +
+  scale_shape_manual(values = c(21, 22) )+
+  scale_color_manual(values=c("#1F78B4","#E31A1C"))+
+  scale_fill_manual(values = c("#FFFF99", "#A6CEE3", "#B2DF8A", "#CAB2D6")) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  guides(fill=guide_legend(override.aes=list(shape=21)))+
+  #guides(color=guide_legend(override.aes=list(shape=21))) +
+  #guides(fill=guide_legend(override.aes=list(shape=21,fill=c("#FFFF99","#A6CEE3","#B2DF8A","#CAB2D6"),color=c("#1F78B4","#E31A1C")))) +
+  theme_bw(18) +
+  labs(fill = "Pseudomonas strain", color = "Time", shape = "Water regime") +
+  #guides(fill= "none") +
+  theme(axis.line = element_line(colour = "black"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank()) 
+  
+
+  PCA # data frame from whch I want to make a PCA plot
+  #rename water regime names and pseudomonas strains for figures
+  
+
+  PCA <- PCA %>% mutate('Pseudomonas_strain' =
+                          case_when(Pseudomonas== "control" ~ "Control",
+                                    Pseudomonas=="WCS417" ~ "PsWCS417",
+                                    Pseudomonas=="WCS315" ~ "PsWCS315",
+                                    Pseudomonas=="CHA0" ~ "PsCHA0"))
+                                    
+  colnames(PCA) <- c("PC1", "PC2", "group", "Pseudomonas", "water_regime", "Time_point", "name", "Pseudomonas_strain") # Time -> timepoint
+  
+  PCA$Pseudomonas_strain <- factor(PCA$Pseudomonas_strain, c("Control", "PsWCS417", "PsWCS315", "PsCHA0"))
+  PCA$water_regime <- factor(PCA$water_regime, c("well_watered", "drought"))
+  
+#make PCA
+  ggplot(PCA, aes(PC1, PC2, fill=Pseudomonas_strain, color= water_regime, shape = Time_point))+
+    geom_point(size=8, stroke = 2)+
+    scale_shape_manual(values = c(21, 22) )+
+    scale_color_manual(values=c("black","grey"))+
+    scale_fill_manual(values = c("#76CFE8", "#C9DC53", "#F99F58", "#9771A5")) +
+    guides(fill=guide_legend(override.aes=list(shape=21)))+
+    #geom_mark_ellipse(expand = 0.03,aes(fill=Pseudomonas_strain)) +
+    xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+    ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+    theme_bw(18) +
+    labs(fill = "Pseudomonas strain", color = "Water regime", shape = "Time point") +
+    theme(axis.line = element_line(colour = "black"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank()) 
+  
+  #save it
+  mapply(function(x)
+    ggsave(
+      plot = last_plot(),
+      filename =x,
+      path = "./3_Arabidopsis_RNAseq_exp/results/plots",
+      scale = 1.8,
+      width = 200,
+      height = 100,
+      units = "mm",
+      dpi = 300),
+    x=c("Fig.2A_PCA_RNAseq.svg","Fig.2A_PCA_RNAseq.png"))
+  
+
+```
+
+#PERMANOVA
+```{r}
+pca_dist <- dist(PCA[, c("PC1", "PC2")])  # Euclidean distance on PC scores
+
+# Run PERMANOVA (replace factors with yours)
+adonis_result <- adonis2(
+  pca_dist ~ Pseudomonas_strain + Time_point  + water_regime ,
+  data = PCA,
+  permutations = 999,
+  method = "euclidean"
+)
+
+print(adonis_result)
+
+#save table in word
+adonis_df <- as.data.frame(adonis_result)
+
+# Add row names as a proper column
+adonis_df$Factor <- rownames(adonis_df)
+
+# Move 'Factor' to the first column
+adonis_df <- adonis_df[, c("Factor", setdiff(names(adonis_df), "Factor"))]
+
+# Round values for clarity
+adonis_df$`Pr(>F)` <- formatC(adonis_df$`Pr(>F)`, format = "f", digits = 3)
+adonis_df$R2 <- round(adonis_df$R2, 3)
+adonis_df$F <- round(adonis_df$F, 2)
+adonis_df$SumOfSqs <- round(adonis_df$SumOfSqs, 2)
+
+# Create styled flextable
+adonis_ft <- flextable(adonis_df) |>
+  theme_booktabs() |>
+  autofit() |>
+  bold(i = ~ `Pr(>F)` < 0.05, part = "body") |>
+  set_header_labels(
+    Factor = "Factor", Df = "DF", SumOfSqs = "Sum Sq",
+    R2 = "R²", F = "F-value", `Pr(>F)` = "p-value"
+  )
+
+#export in a word
+doc <- read_docx() |>
+  body_add_par("Table: PERMANOVA Results on PCA Scores", style = "heading 2") |>
+  body_add_flextable(adonis_ft)
+
+print(doc, target = "PERMANOVA_results.docx")
+
+
+
+```
+
+##Pairwise compaisons
+```{r}
+
+# Assuming pca_dist is your distance matrix and pcaData contains the grouping factor
+pairwise_results <- pairwise.adonis2(
+  pca_dist ~ Pseudomonas_strain + Time_point  + water_regime,
+  data = PCA,
+  permutations = 999,
+  p.adjust.m = "bonferroni"  # or "fdr" for false discovery rate
+)
+
+print(pairwise_results)
+
+
+#save results for word table
+
+
+# Create a new Word document
+doc <- read_docx()
+
+# Loop through each comparison in the pairwise results
+for (comparison in names(pairwise_results)) {
+  
+  if (comparison != "parent_call") {
+    df <- as.data.frame(pairwise_results[[comparison]])
+    
+    # Add Factor as a column (if rownames are not already in a column)
+    df$Factor <- rownames(df)
+    df <- df[, c("Factor", setdiff(names(df), "Factor"))]
+    
+    # Round values for clarity
+    num_cols <- sapply(df, is.numeric)
+    df[num_cols] <- lapply(df[num_cols], function(x) round(x, 3))
+    
+    # Create flextable
+    ft <- flextable(df) %>%
+      autofit() %>%
+      theme_booktabs() %>%
+      bold(i = ~ `Pr(>F)` < 0.05, part = "body") %>%
+      set_header_labels(
+        Factor = "Factor", Df = "DF", SumOfSqs = "Sum Sq",
+        R2 = "R²", F = "F-value", `Pr(>F)` = "p-value"
+      )
+    
+    # Add section title and table to document
+    doc <- doc %>%
+      body_add_par(paste("Comparison:", comparison), style = "heading 2") %>%
+      body_add_flextable(ft) %>%
+      body_add_par("", style = "Normal")  # spacing
+  }
+}
+
+# Save document
+print(doc, target = "pairwise_PERMANOVA_results.docx")
+
+```
+
+```
