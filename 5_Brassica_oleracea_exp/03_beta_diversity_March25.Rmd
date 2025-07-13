@@ -1,0 +1,709 @@
+---
+title: "03_beta_diversity"
+author: "Zulema Carracedo Lorenzo"
+date: "2025-03-10"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+#summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+#plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+#Load packages
+```{r}
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(vegan) #for permanova
+library(pairwiseAdonis) #for potshoc
+library(tibble)
+library(umap)
+library(metagMisc)
+library(microbiome)
+library(RColorBrewer)
+
+#for exporting tables 
+library(flextable)
+library(officer)
+
+```
+
+#Load phyloseq object
+```{r}
+load("./results/phyloseq/ps_filtered.RData") 
+
+```
+
+#Subset data
+
+```{r}
+#We will only use the samples from the bulk soil
+
+ps_filtered_bulk <-  subset_samples(ps_filtered, Sample_type %in% "bulk_soil")
+ps_filtered_bulk <- prune_taxa(taxa_sums(ps_filtered_bulk) >0, ps_filtered_bulk)
+
+```
+
+##Keep only informative ASVs
+
+#I will use Chrats filtering, it keeps those ASvs with relative abundance higher than 0.001%
+
+#### [1. Non-filtered] ####
+
+```{r}
+
+#non-filtered ps object
+ps_filtered_bulk # Initial 48,027 ASVs
+
+#The code for filtering was writted by Chrats in the 01_Preprocessing script from the Brassicaceae Fam Exp. I took the modified version from Marcela's PS_microbiome repository as it was more clear
+
+```
+
+#### [2. Soft-filtering - By water regime] ####
+
+```{r}
+#Preparing data
+tax_table(ps_filtered_bulk)<-cbind(rownames(tax_table(ps_filtered_bulk)), tax_table(ps_filtered_bulk)) #make new with rownames
+colnames(tax_table(ps_filtered_bulk))[1] <- "ASV" #name column ASV
+
+#Select the condition by which I will be filtering -> water_regime
+conds_WR <- unique(sample_data(ps_filtered_bulk)$water_regime)
+
+#1) filter out mean relative abundance lower than 0.0001% per water regime 
+#The threshold has to be 10x lower for bacteria because there's not a lot of super abundant ASVs compared to Fungi 
+
+phyloseq_RA_per_WR<-list() #empty list
+
+#make one ps per DES_group and keep only those ASVs which have a relabundance > than 0.0001%
+#In this case a DES_group it's each Experiment
+
+for(i in 1:length(conds_WR)){
+  meta <- ps_filtered_bulk@sam_data[which(sample_data(ps_filtered_bulk)$water_regime == conds_WR[i]),] 
+  x16S_temp<-subset_samples(ps_filtered_bulk, sample_data(ps_filtered_bulk)$water_regime %in% conds_WR[i])
+  x16S_temp = prune_taxa(taxa_sums(x16S_temp) != 0, x16S_temp) 
+  x16S_temp.prop = transform_sample_counts(x16S_temp, function(x) x / sum(x) ) #relabundance
+  filt1 = filter_taxa(x16S_temp.prop, function(x) mean(x) > 0.0001, TRUE)
+  
+  phyloseq_RA_per_WR[[i]]<-filt1
+  
+}
+
+#lists with taxa (ASV) names
+ASVs_all_RA<-lapply(phyloseq_RA_per_WR, function(x) rownames(x@otu_table) )
+length(unique(unlist(ASVs_all_RA)))  #1,912 ASVs
+
+#make it a single ps object pruning those ASVs selected before 
+ps_filtered_bulk_soft <- ps_filtered_bulk %>%
+  phyloseq::subset_taxa(
+    ASV %in% unique(unlist(ASVs_all_RA)))
+
+ps_filtered_bulk_soft # Final 1912 ASVs
+sum(taxa_sums(ps_filtered_bulk_soft))/sum(taxa_sums(ps_filtered_bulk)) # 84.8% of original reads kept
+
+#clean
+rm(ASVs_all_RA, filt1, x16S_temp, x16S_temp.prop, meta, phyloseq_RA_per_WR, i, conds_WR)
+
+
+
+```
+
+#### [3. Soft-filtering - By Water Regime & Treatment] ####
+
+```{r}
+
+#3) filter out mean relative abundance of 0.0001% per combination of Water Regime & Treatment
+
+#make new column with unique groups by the combination of Water Regime & Treatment
+sample_data(ps_filtered_bulk)$DES_groups <- paste0(sample_data(ps_filtered_bulk)$water_regime, "_", phyloseq::sample_data(ps_filtered_bulk)$treatment)
+conds_WR_TR <-unique(sample_data(ps_filtered_bulk)$DES_groups)
+
+phyloseq_per_combination<-list() #empty list
+
+#make one ps per DES_group and keep only those ASVs which have a relabundance > than 0.0001%
+for(i in 1:length(conds_WR_TR)){
+  meta <- ps_filtered_bulk@sam_data[which(sample_data(ps_filtered_bulk)$DES_groups == conds_WR_TR[i]),] 
+  x16S_temp<-subset_samples(ps_filtered_bulk, sample_data(ps_filtered_bulk)$DES_groups %in% conds_WR_TR[i])
+  x16S_temp = prune_taxa(taxa_sums(x16S_temp) != 0, x16S_temp) 
+  x16S_temp.prop = transform_sample_counts(x16S_temp, function(x) x / sum(x) ) #relabundance
+  filt1 = filter_taxa(x16S_temp.prop, function(x) mean(x) > 0.0001, TRUE)
+  
+  phyloseq_per_combination[[i]]<-filt1
+  
+}
+
+#lists with taxa (ASV) names
+ASVs_all_RA<-lapply(phyloseq_per_combination, function(x) rownames(x@otu_table) )
+length(unique(unlist(ASVs_all_RA))) #2,760 unique ASVs
+
+#make it a single ps object pruning those ASVs selected before 
+ps_filtered_bulk_soft_comb_WR_TR <- ps_filtered_bulk %>%
+  phyloseq::subset_taxa(
+    ASV %in% unique(unlist(ASVs_all_RA)))
+
+#check
+sum(taxa_sums(ps_filtered_bulk_soft_comb_WR_TR))/sum(taxa_sums(ps_filtered_bulk)) # common set represents 88.8% of all reads  
+ps_filtered_bulk_soft_comb_WR_TR #2,360 ASVs final 
+
+#clean
+rm(x16S_temp, filt1, meta, x16S_temp.prop, ASVs_all_RA, i)
+
+```
+
+
+
+#### [5. Hard-filtering - By Water Regime & Treatment] ####
+
+```{r}
+# 4) filter out mean relative abundance of 0.001% & presence in at least 50% of samples
+# per combination of Water Regime & Treatment
+
+phyloseq_hard<-list() #empty list
+conds_WR_TR <- unique(sample_data(ps_filtered_bulk_soft_comb_WR_TR)$DES_groups) #The base is the ps_filtered_bulk_soft_comb_WR_ST ps object we just did
+
+#make a for loop to split ps in all the DES groups
+for(i in 1:length(conds_WR_TR)){
+  #counts number of zeroes per condition
+  #this is the threshold value
+  meta <- ps_filtered_bulk_soft_comb_WR_TR@sam_data[which(sample_data(ps_filtered_bulk_soft_comb_WR_TR)$DES_groups == conds_WR_TR[i]),] 
+  Bac_temp<-subset_samples(ps_filtered_bulk_soft_comb_WR_TR, #subset into each DES_group category
+            sample_data(ps_filtered_bulk_soft_comb_WR_TR)$DES_groups %in% conds_WR_TR[i]) 
+  Bac_temp =prune_taxa(taxa_sums(Bac_temp) != 0, Bac_temp) #remove all those ASVs that have 0 reads
+  
+  phyloseq_hard[[i]]<-Bac_temp
+  
+}
+
+#Now, use the function phyloseq_filter_prevalence() on each of the DES groups to keep only those 
+#ASVs that are present in at least 50% of the samples
+prevalence_hard <-lapply(phyloseq_hard, function(ps){
+  
+  ps_byPrev <- phyloseq_filter_prevalence(ps, prev.trh = 0.50, #function from metagMisc package
+                                          abund.trh = NULL)
+  #final filtered ps
+  return(ps_byPrev)
+})
+
+#Get names of ASVs
+ASVnames <-lapply(prevalence_hard, function(x) rownames(x@otu_table))
+
+#See how many unique ASVs are per experiment
+length(unique(unlist(ASVnames))) #2,471 unique ASVs
+
+#Get a vector of the ASV names
+ASV_tokeep <- unique(unlist(ASVnames))
+
+#finally, make it a single ps object keeping that list of unique ASVs
+ps_filtered_bulk_comb_WR_TR_hard <- prune_taxa(ASV_tokeep, ps_filtered_bulk)
+
+#check
+sum(taxa_sums(ps_filtered_bulk_comb_WR_TR_hard))/sum(taxa_sums(ps_filtered_bulk)) # common set represents 87.35% of all reads  
+
+#clean
+rm(phyloseq_hard, conds_WR_TR, meta, Bac_temp, prevalence_hard, ASVnames, ASV_tokeep)
+```
+
+
+### Normalize data 
+```{r}
+#Cumulative Sum Scaling (CSS) is a median-like quantile normalization which corrects differences in sampling depth (library size). While standard relative abundance (fraction/percentage) normalization re-scales all samples to the same total sum (100%), CSS keeps a variation in total counts between samples.
+
+#make a list of our ps objects
+ps_l <- list(non_filt=ps_filtered_bulk, ByWR=ps_filtered_bulk_soft, soft=ps_filtered_bulk_soft_comb_WR_TR, hard=ps_filtered_bulk_comb_WR_TR_hard)
+
+#normalize them with CSS 
+ps_l_CSS <- lapply(ps_l, function(ps) phyloseq_transform_css(ps, norm=TRUE, log=TRUE))
+#check
+sample_sums(ps_l_CSS$non_filt) #good
+sample_sums(ps_l_CSS$ByWR)
+
+#remove single ps to release space in the environment
+rm(ps_filtered_bulk, ps_filtered_bulk_soft, ps_filtered_bulk_soft_comb_WR_TR, ps_filtered_bulk_comb_WR_TR_hard)
+
+```
+
+#Saving phyloseque objects
+```{r}
+#I decided I will work with ps_filtered_bulk_comb_WR_TR_hard Give it an easier name and save it 
+
+ps_hard_filt_unnorm <- ps_filtered_bulk_comb_WR_TR_hard
+save(ps_hard_filt_unnorm, file = "./Results/phyloseq/ps_hard_filt_unnorm_March25.RData")
+load(file = "./Results/phyloseq/ps_hard_filt_unnorm_March25.RData")
+
+#save also the CSS normalized object
+ps_hard_filt_CSS <- ps_l_CSS$hard
+save(ps_hard_filt_CSS, file = "./Results/phyloseq/ps_hard_filt_CSS_March25.RData")
+load(file = "./Results/phyloseq/ps_hard_filt_CSS_March25.RData")
+
+```
+
+
+# Beta-diversity plots
+## NMDS
+```{r}
+# calculate NMDS ordination for the different ps objects
+
+  set.seed(300)
+  NMDS_l <- lapply(ps_l_CSS, function (x)
+          ordinate(x,
+                   method="NMDS",
+                   distance="bray",
+                   try=200,
+                   autotransform=TRUE))
+
+ save(NMDS_l , file="./results/r_objects/beta_diversity/NMDS_l_MArch25.RData") 
+ load(file="./results/r_objects/beta_diversity/NMDS_l.RData")
+
+ #NMDS plots
+ 
+ PCoA_plot_calculation_l <- function(physeq_l, ordination_output) {
+  
+    untitled_plot_l<-mapply(function(x, y)
+    phyloseq::plot_ordination(physeq = x, 
+                              ordination = y,
+                              color ="treatment",
+                              shape = "water_regime") + 
+      theme_classic() +
+      theme(plot.title = element_text(size = 10, face = "bold")) +
+      theme(legend.position="right"),
+    x = physeq_l,
+    y = ordination_output,
+    SIMPLIFY = FALSE)
+ 
+
+
+titles_l <- names(untitled_plot_l)
+
+
+
+Plot_l<- mapply(function (z,w)
+  z + ggtitle(w),
+  z = untitled_plot_l,
+  w = titles_l,
+  SIMPLIFY = FALSE)
+
+return(Plot_l)
+}
+
+NMDS_plots <-  PCoA_plot_calculation_l(ps_l_CSS, NMDS_l)
+
+#save plots
+# create a list of plot names
+plot_names <- c("non_filt_March25.png", "soft_WR_March25.png", "soft_WR_TR_March25.png",  "hard_WR_ST_March25.png")
+
+lapply(seq_along(NMDS_plots), function(i) {
+  ggsave(plot_names[i], plot = NMDS_plots[[i]],
+         path = "./results/plots/beta_diversity",
+         width = 30, height = 20, units = "cm")
+})
+
+
+
+
+#### Make plots only for hard filtering phyloseq object ###
+
+  set.seed(300)
+  NMDS <- ordinate(ps_hard_filt_CSS,
+                   method="NMDS",
+                   distance="bray",
+                   try=200,
+                   autotransform=TRUE)
+  
+  
+  plot_ordination(physeq = ps_hard_filt_CSS, 
+                              ordination = NMDS,
+                              color ="treatment",
+                              shape = "water_regime") + 
+      theme_classic() +
+      theme(plot.title = element_text(size = 15, face = "bold")) +
+      theme(legend.position="right")+
+      geom_point(size =4)
+  
+## calculate only on WW samples
+  
+ ps_hard_filt_CSS_WW <-  subset_samples(ps_hard_filt_CSS, water_regime== "WW")
+  
+  set.seed(300)
+  NMDS <- ordinate(ps_hard_filt_CSS_WW,
+                   method="NMDS",
+                   distance="bray",
+                   try=200,
+                   autotransform=TRUE)
+  
+  
+  plot_ordination(physeq = ps_hard_filt_CSS_WW, 
+                              ordination = NMDS,
+                              color ="treatment") + 
+      theme_classic() +
+      theme(plot.title = element_text(size = 15, face = "bold")) +
+      theme(legend.position="right")+
+      geom_point(size =4)
+  
+
+  
+    ## calculate only on WW samples
+  
+ ps_hard_filt_CSS_DR <-  subset_samples(ps_hard_filt_CSS, water_regime== "DR")
+  
+  set.seed(300)
+  NMDS <- ordinate(ps_hard_filt_CSS_DR,
+                   method="NMDS",
+                   distance="bray",
+                   try=200,
+                   autotransform=TRUE)
+  
+  
+  plot_ordination(physeq = ps_hard_filt_CSS_DR, 
+                              ordination = NMDS,
+                              color ="treatment") + 
+      theme_classic() +
+      theme(plot.title = element_text(size = 15, face = "bold")) +
+      theme(legend.position="right")+
+      geom_point(size =4)
+  
+```
+
+## UMAP
+
+```{r}
+# First transpose OTU table so that rows are samples and OTUs columns 
+
+otu_table_l <- lapply(ps_l_CSS, function(x)
+                                t(otu_table(x)))
+
+# Calculate dissimilarity indexes with bray curtis method 
+
+bray_l <- lapply(otu_table_l, function (x)
+    vegdist(x, method = "bray"))
+
+bray_matrix_l <- lapply(bray_l, function (x)
+    as.matrix(x))
+
+# Run UMAP on bray curtis dissimilarity matrix
+
+UMAP_bray_l <- lapply(bray_matrix_l, function (x)
+      umap(x))
+
+save(UMAP_bray_l, file = "./results/r_objects/beta_diversity/UMAP_bray_l.RData")
+load(file = "./results/r_objects/beta_diversity/UMAP_bray_l.RData")
+
+head(UMAP_bray_l$non_filt$layout, 3) #layout is the matrix in which we are interested
+
+
+# plot umap
+
+layoutBray <- lapply(UMAP_bray_l, function (x)
+      as.data.frame(x$layout))
+
+colnames(layoutBray$non_filt) <-  c("UMAP1","UMAP2")
+colnames(layoutBray$ByWR) <-  c("UMAP1","UMAP2")
+colnames(layoutBray$soft) <-  c("UMAP1","UMAP2")
+colnames(layoutBray$soft2) <-  c("UMAP1","UMAP2")
+colnames(layoutBray$hard) <-  c("UMAP1","UMAP2")
+colnames(layoutBray$hard2) <-  c("UMAP1","UMAP2")
+
+umap_meta_non_filt <- cbind(layoutBray$non_filt, sample_data(ps_l_CSS$non_filt))
+umap_meta_ByWR <- cbind(layoutBray$ByWR, sample_data(ps_l_CSS$ByWR))
+umap_meta_soft <- cbind(layoutBray$soft, sample_data(ps_l_CSS$soft))
+umap_meta_soft2 <- cbind(layoutBray$soft2, sample_data(ps_l_CSS$soft2))
+umap_meta_hard <- cbind(layoutBray$hard, sample_data(ps_l_CSS$hard))
+umap_meta_hard2 <- cbind(layoutBray$hard2, sample_data(ps_l_CSS$hard2))
+
+# UMAP plot 
+
+#non-filtered
+umap_meta_non_filt$Treatment_comb <- paste0(sample_data(umap_meta_non_filt)$water_regime, "_", phyloseq::sample_data(umap_meta_non_filt)$treatment) 
+
+  ggplot(umap_meta_non_filt, aes(x=UMAP1,y=UMAP2, colour=Treatment_comb, shape=Sample_type)) +
+  geom_point(aes(color=Treatment_comb), size=5) +
+  ggtitle("UMAP Bray-Curtis 16S / non-filtered")
+
+ggsave("umap_plot_non_filt.png", path = "./results/plots/beta_diversity",
+         width = 30, height = 20, units = "cm")
+
+#soft WR
+umap_meta_ByWR$Treatment_comb <- paste0(sample_data(umap_meta_ByWR)$water_regime, "_", phyloseq::sample_data(umap_meta_ByWR)$treatment) 
+
+  ggplot(umap_meta_ByWR, aes(x=UMAP1,y=UMAP2, colour=Treatment_comb, shape=Sample_type)) +
+  geom_point(aes(color=Treatment_comb), size=5) +
+  ggtitle("UMAP Bray-Curtis 16S / soft WR")
+
+ggsave("umap_plot_soft_WR.png", path = "./results/plots/beta_diversity",
+         width = 30, height = 20, units = "cm")
+
+
+MISSIMG Plots
+
+#Hard WR-ST-T
+umap_meta_hard2$Treatment_comb <- paste0(sample_data(umap_meta_hard2)$water_regime, "_", phyloseq::sample_data(umap_meta_hard2)$treatment) 
+
+  ggplot(umap_meta_hard2, aes(x=UMAP1,y=UMAP2, colour=Treatment_comb, shape=Sample_type)) +
+  geom_point(aes(color=Treatment_comb), size=5) +
+  ggtitle("UMAP Bray-Curtis 16S / soft WR")
+
+ggsave("umap_plot_hard_WR_ST_T.png", path = "./results/plots/beta_diversity",
+         width = 30, height = 20, units = "cm")
+
+```
+
+## Plots for paper
+
+```{r}
+
+  set.seed(300)
+  NMDS <- ordinate(ps_hard_filt_CSS,
+                   method="NMDS",
+                   distance="bray",
+                   try=200,
+                   autotransform=TRUE)
+  
+  
+  plot_ordination(physeq = ps_hard_filt_CSS, 
+                              ordination = NMDS,
+                              color ="treatment",
+                              shape = "water_regime") + 
+    scale_color_manual(values = c("#FFFF99", "#A6CEE3", "#B2DF8A", "#CAB2D6")) +
+    scale_shape_manual(values = c(21, 22) )+
+      theme_classic() +
+      theme(plot.title = element_text(size = 15, face = "bold")) +
+      theme(legend.position="right")+
+      geom_point(size =5)
+  
+  
+table_NMDS <- as.data.frame(NMDS$points) #save NMDS values in a dataframe
+
+metadata <- as.data.frame(sample_data(ps_hard_filt_CSS)) #save metadata in a dataframe
+
+metadata <- cbind(metadata, table_NMDS) #add NMDS1 and NMDS2 columns to metadate
+
+#arrange order of factor for ggplot
+metadata$treatment <- factor(metadata$treatment, c("Control", "WCS417", "WCS315", "CHA0"))
+metadata$water_regime <- factor(metadata$water_regime, c("WW", "DR"))
+
+ggplot(metadata, aes(MDS1,MDS2, fill=treatment, shape = water_regime))+
+    geom_point(size=8, stroke = 2)+
+    scale_shape_manual(values = c(21, 22) )+
+    scale_fill_manual(values = c("#FFFF99", "#A6CEE3", "#B2DF8A", "#CAB2D6")) +
+    guides(fill=guide_legend(override.aes=list(shape=21)))+
+    #geom_mark_ellipse(expand = 0.03,aes(fill=Pseudomonas_strain)) +
+    #xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+    #ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+    theme_bw(18) +
+    labs(x = "NMDS1", y = "NMDS2", fill = "Pseudomonas strain",  shape = "Sample type") +
+    theme(axis.line = element_line(colour = "black"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank()) 
+
+ ggsave("NMDS_hardfilt_March25.pdf", width = 40, height = 25, units = "cm", dpi=800)
+ 
+#Let's add the centroid info
+metadata
+
+centroids <- metadata %>%
+  group_by( DES_groups) %>%
+  summarize(meanNMDS1 = mean(MDS1), meanNMDS2 = mean(MDS2))
+
+#add centroid data to metadata
+metadata <- merge(metadata, centroids, by = "DES_groups")
+
+
+# Plot NMDS with centroids
+ggplot(nmds_scores, aes(x = MDS1.x, y = MDS2.x, color = treatment, shape = water_regime)) +
+  geom_point(size = 3, alpha = 0.7) +  # Points for each sample
+  geom_point(data = centroids, aes(x = meanNMDS1, y = meanNMDS2, color = treatment, shape = water_regime), 
+             size = 5, shape = 17) +  # Centroids with different shape
+  geom_text(data = centroids, vjust = -1, size = 5) +  # Label centroids
+  theme_minimal() +
+  labs(title = "NMDS Plot with Treatment Centroids") +
+  theme(legend.position = "right")
+
+
+centroids$treatment <- factor(centroids$treatment, c("Control", "WCS417", "WCS315", "CHA0"))
+centroids$water_regime <- factor(centroids$water_regime, c("WW", "DR"))
+control <- #648FFF
+WCS417 <- #DC267F
+WCS315 <- #FE6100
+CHA0 <- #FFB000
+
+ggplot(metadata,aes(MDS1,MDS2,color=treatment,fill=treatment, shape = water_regime)) +
+  geom_point(size=3, alpha=1) + 
+  scale_shape_manual(values = c(21, 22) )+
+    scale_fill_manual(values = c("#648FFF", "#DC267F", "#FE6100", "#FFB000")) +
+  geom_segment(aes(x=meanNMDS1 , y=meanNMDS2, xend=MDS1, yend=MDS2, color = treatment), alpha = 1) +
+  scale_color_manual(values = c("#648FFF", "#DC267F", "#FE6100", "#FFB000")) +
+  geom_point(aes(x=meanNMDS1 , y=meanNMDS2), size = 10)+
+  labs(x = "NMDS1", y = "NMDS2", fill = "Pseudomonas strain",  shape = "Sample type") +
+    theme_bw() + 
+    theme(text = element_text(size = 20))
+
+
+ggsave("NMDS_centroids_March25.pdf", width = 40, height = 25, units = "cm", dpi=800)
+ 
+ 
+```
+
+2.3. Permanovas
+
+##Permanova for papers
+
+```{r}
+set.seed(303848)
+permanova <- adonis2(formula = phyloseq::distance(t(otu_table(ps_hard_filt_CSS)), method="bray") ~ treatment + water_regime,
+              data = as(sample_data(ps_hard_filt_CSS),"data.frame"), # changing with as.data.frame is insufficient
+              permutations = 999, by = "margin")
+
+#save output 
+# Convert output to data frame
+permanova_df <- as.data.frame(permanova)
+permanova_df$Factor <- rownames(permanova_df)
+permanova_df <- permanova_df[, c("Factor", setdiff(names(permanova_df), "Factor"))]
+
+# Round values
+permanova_df$`Pr(>F)` <- formatC(permanova_df$`Pr(>F)`, format = "f", digits = 3)
+permanova_df$R2 <- round(permanova_df$R2, 3)
+permanova_df$F <- round(permanova_df$F, 2)
+permanova_df$SumOfSqs <- round(permanova_df$SumOfSqs, 2)
+
+# Create styled flextable
+permanova_ft <- flextable(permanova_df) |>
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ `Pr(>F)` < 0.05, part = "body") |>
+  set_header_labels(
+    Factor = "Factor", Df = "DF", SumOfSqs = "Sum Sq",
+    R2 = "R²", F = "F-value", `Pr(>F)` = "p-value"
+  )
+
+# Export to Word
+doc <- read_docx() |>
+  body_add_par("Table: PERMANOVA Results (Bray-Curtis Dissimilarity)", style = "heading 2") |>
+  body_add_flextable(permanova_ft)
+
+print(doc, target = "PERMANOVA_brays_result.docx")
+
+
+#Now perform posthoc test 
+# Distance matrix (use the same as in your main PERMANOVA)
+dist_mat <- phyloseq::distance(t(otu_table(ps_hard_filt_CSS)), method = "bray")
+
+
+# Pairwise adonis by treatment
+pairwise_results <- pairwise.adonis2(
+  dist_mat ~ treatment,
+  data = metadata,
+  permutations = 999,
+  p.adjust.m = "bonferroni"  # or "fdr" for less conservative adjustment
+)
+
+#save table for publication 
+
+# Convert results to data frame
+pairwise_df <- do.call(rbind, pairwise_results[-1])  # skip $parent_call
+pairwise_df$Comparison <- names(pairwise_results)[-1]
+pairwise_df <- pairwise_df[, c("Comparison", names(pairwise_df)[1:(ncol(pairwise_df)-1)])]
+
+# Make table
+pairwise_ft <- flextable(pairwise_df) |>
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ `Pr(>F)` < 0.05, part = "body") |>
+  set_header_labels(
+    Comparison = "Comparison",
+    Df = "DF",
+    SumOfSqs = "Sum Sq",
+    R2 = "R²",
+    F = "F-value",
+    `Pr(>F)` = "p-value"
+  )
+
+# Export
+doc <- read_docx() |>
+  body_add_par("Table: Pairwise PERMANOVA Results", style = "heading 2") |>
+  body_add_flextable(pairwise_ft)
+
+print(doc, target = "pairwise_PERMANOVA.docx")
+
+```
+
+
+## 2.3.1. Permanova for 16S samples
+
+```{r}
+#For now I will only test well-watered samples, as we don't have enough replicates for drought controls
+#testing permanovas 16S 
+set.seed(303848)
+permanova <- adonis2(formula = phyloseq::distance(t(otu_table(ps_hard_filt_CSS_WW)), method="bray") ~ treatment  + Sample_type,
+              data = as(sample_data(ps_hard_filt_CSS_WW),"data.frame"), # changing with as.data.frame is insufficient
+              permutations = 999, by = "margin")
+
+
+
+# Pairwise PERMANOVA 16S treatement factor
+dist_bray_WW <- phyloseq::distance(t(otu_table(ps_hard_filt_CSS_WW)), method="bray")
+set.seed(123)  
+pairwise_adonis <- adonis_pairwise(x=metadata_WW, dd=dist_bray, group.var = "treatment")
+pairwise_adonis$Adonis.tab
+pairwise_adonis$Betadisper.tab
+
+set.seed(123)  
+EcolUtils::adonis.pair(dist_bray_WW, metadata_WW$treatment)
+
+
+#If I test only WW-rhizosphere samples
+ps_hard_filt_CSS_WW_rhizo <- subset_samples(ps_hard_filt_CSS_WW, Sample_type == "rhizosphere")
+
+set.seed(303848)
+permanova <- adonis2(formula = phyloseq::distance(t(otu_table(ps_hard_filt_CSS_WW)), method="bray") ~ treatment  ,
+              data = as(sample_data(ps_hard_filt_CSS_WW),"data.frame"), # changing with as.data.frame is insufficient
+              permutations = 999, by = "margin")
+
+dist_bray_WW_Rhizo <- phyloseq::distance(t(otu_table(ps_hard_filt_CSS_WW_rhizo)), method="bray")
+metadata_WW_rhizo <- as.data.frame(sample_data(ps_hard_filt_CSS_WW_rhizo))
+metadata_WW_rhizo$treatment <- as.factor(metadata_WW_rhizo$treatment) #treatment needs to be a factor
+
+set.seed(123)  
+EcolUtils::adonis.pair(dist_bray_WW_Rhizo, metadata_WW_rhizo$treatment)
+
+
+
+### Drought bulk soil ###
+
+set.seed(303848)
+permanova <- adonis2(formula = phyloseq::distance(t(otu_table(ps_hard_filt_CSS_DR_bulk)), method="bray") ~ treatment  ,
+              data = as(sample_data(ps_hard_filt_CSS_DR_bulk),"data.frame"), # changing with as.data.frame is insufficient
+              permutations = 999, by = "margin")
+
+dist_bray_WW_Rhizo <- phyloseq::distance(t(otu_table(ps_hard_filt_CSS_WW_rhizo)), method="bray")
+metadata_WW_rhizo <- as.data.frame(sample_data(ps_hard_filt_CSS_WW_rhizo))
+metadata_WW_rhizo$treatment <- as.factor(metadata_WW_rhizo$treatment) #treatment needs to be a factor
+
+set.seed(123)  
+EcolUtils::adonis.pair(dist_bray_WW_Rhizo, metadata_WW_rhizo$treatment)
+
+
+```
+

@@ -1,0 +1,532 @@
+---
+title: "01_preprocessing"
+author: "Zulema Carracedo Lorenzo"
+date: "2023-10-05"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+#summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+#plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+#Load packages
+```{r}
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(vegan)
+library(decontam)
+```
+
+# Load data
+
+##OTU table
+```{r}
+# Load OTU table
+otu <- otu_table(object = read.table(file = "./5_Brassica_oleracea_exp/data/novaseq_ernakovich_output/seqtab_final.txt", 
+                                              header = TRUE,
+                                              row.names = 1, # first column has row names (ASV names)
+                                              check.names = FALSE), # prevents "X" to be added to column names
+                                              taxa_are_rows = TRUE)
+
+
+```
+
+## Taxonomy tabe
+
+```{r}
+# Load taxonomy able
+taxtab <-read.table(file = "./5_Brassica_oleracea_exp/data/novaseq_ernakovich_output/taxonomy.tsv", 
+                               header = TRUE,
+                               sep = "\t",
+                               row.names = 1, # first column has row names (ASV names)
+                               check.names = FALSE) # prevents "X" to be added to column names, such as X49_16S
+
+# adjusts number and name of columns
+taxtab<- separate(data = taxtab,
+                          col = Taxon,
+                          into =c("Kingdom", 
+                                       "Phylum", 
+                                       "Class", 
+                                       "Order", 
+                                       "Family",
+                                       "Genus", 
+                                       "Species"),
+                               sep = ";")
+head(taxtab) #check
+
+# saves taxtable as phyloseq object
+taxtab<-tax_table(object = as.matrix(taxtab))
+```
+
+
+##Sequences
+```{r}
+# Load sequences 
+refseq <- refseq(physeq = Biostrings::readDNAStringSet(filepath = "./5_Brassica_oleracea_exp/data/novaseq_ernakovich_output/repset.fasta",
+                                                       use.names = TRUE)) 
+
+head(taxa_names(refseq)) #check
+
+
+```
+
+## Metadata
+```{r}
+#Load metadata
+
+metadata <- read.table(file = "./5_Brassica_oleracea_exp/data/novaseq_ernakovich_output/sample_data.txt", 
+                                                  header = TRUE,
+                                                  sep = "\t",
+                                                  row.names = 1, # first column has row names (ASV names)
+                                                  check.names = FALSE)
+
+#check structure of dataframe
+
+str(metadata)
+colnames(metadata) #correct
+rownames(metadata) #sample-ID
+
+#Finally make it a sample_data object for phyloseq 
+metadata<- sample_data(metadata)
+```
+
+##Make a phyloseq object
+```{r}
+#Merge to create phyloseq 
+ps <- merge_phyloseq(metadata, otu, taxtab, refseq) #65,144 taxa, 95 samples
+
+#Add total number of reads
+ps@sam_data$Library_size <- sample_sums(ps)
+
+#Kep the phyloseq object and remove the single objects
+rm(metadata, otu, taxtab, refseq)
+
+#save ps object 
+save(ps, file = "./5_Brassica_oleracea_exp/r_objects/ps.RData")
+load(file = "./5_Brassica_oleracea_exp/r_objects/ps.RData")
+
+# run garbage collection after creating large objects
+gc()
+
+```
+
+## Let's have a first look to the data
+
+```{r}
+#quick check on the number of reads 
+sums <- sample_sums(ps)
+sums[order(sums)]
+
+# Lowest and highest total count:
+min(sums) #259,522
+max(sums) #770,824
+
+# Sample with lowest counts:
+names(sums[order(sums)][1]) #it's a sample of bulk soil (ZSB-51)
+
+#see the correlation between number of reads and diversity of ASVs
+t_otu <- t(otu_table(ps)) #transpose observations to rows, needed for vegan package
+class(t_otu) <- "matrix" #it needs to be forced to be a matrix, if not vegan gives me an error for the rarecurve function
+rarecurve((t_otu), step=50, cex=0.5) 
+
+ggsave("rarecurve.png", path = "./5_Brassica_oleracea_exp/results/plots/exploration",
+         width = 40, height = 20 , units = "in", dpi=300, scale=0.3)
+
+```
+
+
+##Decontaminate 
+# More info https://benjjneb.github.io/decontam/vignettes/decontam_intro.html
+
+```{r}
+
+#Let's have a look to the library sizes
+df <- as.data.frame(sample_data(ps)) # Put sample_data into a ggplot-friendly data.frame
+#df$LibrarySize <- sample_sums(ps)
+df <- df[order(df$Library_size),]
+df$Index <- seq(nrow(df))
+ggplot(data=df, aes(x=Index, y=Library_size, color=Sample_type)) + geom_point()
+ggplot(data=df, aes(x=Index, y=Library_size, color=water_regime)) + geom_point()
+
+# I will use the function isContaminant with the frequency method.  In this method, the distribution of the frequency of each sequence feature as a function of the input DNA concentration is used to identify contaminants.
+
+#Because the blanks of this experiment were not amplified during the library preparation, we can't use the prevalence method
+
+contamdf<- isContaminant(ps,
+                               method="frequency",
+                               conc="amplicon_concentration_ngul",
+                               
+                               batch=NULL, #all samples correspond to the same experiments, change when new sequenced data comes
+                               threshold=0.05) #default threshold is 0.1
+
+head(contamdf)
+table(contamdf$contaminant) #319 ASVs contaminants, that's  0.49%
+which(contamdf$contaminant) # 319 out of 65144 ASVs were classified as contaminants, some include very abundant sequences including the 14th and 15th most abundant
+
+
+
+# Check which taxa are contaminants
+
+ps_contam <- prune_taxa(contamdf$contaminant, ps)
+tax_table(ps_contam)
+View(as.data.frame(tax_table(ps_contam)))
+plot_bar(ps_contam, "Phylum", fill="Class") #phyllum actinobacteriota and proteobacteria are the most contaminants
+ggsave("contamASVs.png", path = "./5_Brassica_oleracea_exp/results/plots/exploration",
+         width = 40, height = 20 , units = "in", dpi=300, scale=0.3)
+
+
+#Compare a good ASV with a contaminant ASV
+plot_frequency(ps, taxa_names(ps)[c(2,15)], conc="amplicon_concentration_ngul") + 
+  xlab("DNA Concentration ")
+
+#visualized all contaminant
+contaminants_v <- which(contamdf$contaminant)
+plot_frequency(ps, taxa_names(ps)[contaminants_v], conc="amplicon_concentration_ngul") + 
+  xlab("DNA Concentration ")
+
+ggsave("contam_freq.png", path = "./5_Brassica_oleracea_exp/results/plots/exploration",
+         width = 40, height = 20 , units = "in", dpi=300, scale=0.3)
+
+set.seed(100)
+plot_frequency(ps, taxa_names(ps)[sample(which(contamdf$contaminant),20)],
+               conc="amplicon_concentration_ngul")+
+               xlab("DNA concentration (ngul)")+
+    ggtitle("Contaminant ASVs")
+
+ggsave("contam_freq_20.png", path = "./5_Brassica_oleracea_exp/results/plots/exploration",
+         width = 40, height = 20 , units = "in", dpi=300, scale=0.3)
+
+#Which samples have the highest abundance of contaminants?
+p_cont <- plot_bar(ps_contam, fill="Phylum")
+
+p_cont + facet_wrap(~Sample_type, nrow=1, scales="free_x") +
+  ggtitle("samples with the highest abundance of contaminants (319 ASVs)")
+
+# soil samples contain more contaminants than rhizosphere samples
+
+ggsave("contamASVs_per_sample.png", path = "./5_Brassica_oleracea_exp/results/plots/exploration",
+         width = 40, height = 20 , units = "in", dpi=300, scale=0.3)
+
+
+#Make a new phyloseq object by removing the contaminant ASVs
+contam_ASVs <- subset(contamdf, contaminant=="TRUE") 
+contam_ASVs <- row.names(contam_ASVs)
+ps_decontam <- prune_taxa(!taxa_names(ps) %in% contam_ASVs, ps) #319 contam ASVs have been removed
+#remove those ASVs with now 0 reads 
+prune_taxa(taxa_sums(ps_decontam) >0, ps_decontam)
+
+#What proportion of our count data were removed as contaminants?
+pre <- sum(sample_sums(ps))
+post <- sum(sample_sums(ps_decontam))
+
+(pre-post) / pre #only 0.06%
+
+#plot final ps to check if the condition is not matched
+set.seed(100)
+plot_frequency(seqtab = ps_decontam, 
+               taxa = sample(taxa_names(ps_decontam),20),
+               conc="amplicon_concentration_ngul")+
+    #aes(color = libsize_after_filtering)+
+    #scale_color_viridis()+
+    ggtitle("Real ASVs") #doesn't look good, check again
+
+ggsave("Real_ASVs_freq_20.png", path = "./5_Brassica_oleracea_exp/results/plots/exploration",
+         width = 40, height = 20 , units = "in", dpi=300, scale=0.3)
+
+#check number of reads 
+plot(sort(sample_sums(ps_decontam))) #still some samples with very few reads 
+
+#make new column with this information
+ps_decontam@sam_data$libsize_after_decontam <- sample_sums(ps_decontam)
+
+sort(ps_decontam@sam_data$libsize_after_decontam) #some samples still have low number of reads
+```
+
+
+##Filtering
+
+##Non-bacterial ASVs and plastid dna
+
+```{r}
+#Remove non-bacterial ASVs
+
+ps_Bac <- subset_taxa(ps_decontam, Kingdom=="d__Bacteria") #down to 64761 taxa
+
+#Chloroplast contamination
+p_Chloro <- plot_bar(subset_taxa(ps_Bac, Order==" o__Chloroplast"), fill="Species")
+p_Chloro + facet_wrap(~Sample_type, nrow=1, scales="free_x") +
+  ggtitle("Chloroplast contamination") 
+
+#sample ZSB-51 has much higher chloroplast contamination than other samples. This is very surprisin as it is a bulk soil samples
+
+ggsave("Bac.Chloroplast-contam.png", path = "./5_Brassica_oleracea_exp/results/plots/exploration",
+         width = 40, height = 20 , units = "in", dpi=300, scale=0.5)
+
+#mitochondria
+p_Mito <- plot_bar(subset_taxa(ps_Bac, Family==" f__Mitochondria"), fill="Species")
+p_Mito + facet_wrap(~Sample_type, nrow=1, scales="free_x") +
+  ggtitle("Mitochondria contamination")
+
+ggsave("Bac.Mitochondria-contam.png", path = "./5_Brassica_oleracea_exp/results/plots/exploration",
+         width = 40, height = 20 , units = "in", dpi=300, scale=0.5)
+
+#clean 
+rm(p_Chloro, p_Mito)
+
+#remove plastid reads
+Mitochondria_ps<- subset_taxa(ps_Bac, Family==" f__Mitochondria" | Family == "Mitochondria") #there's 26 taxa 
+Chloroplast_ps <-subset_taxa(ps_Bac, Order == " o__Chloroplast" | Order == "Chloroplast") #there's 88 taxa
+
+host_plant_ps<-merge_phyloseq(Chloroplast_ps, Mitochondria_ps) #114 taxa
+
+#quick histogram showing plant DNA contamination
+hist(sample_sums(host_plant_ps)/sample_sums(ps_Bac)*100, breaks = 100) #from 0 to 40% host DNA contamination contamination
+
+#investigate the most abundant chloroplast ASV
+tax_table(Chloroplast_ps)
+View(as.data.frame(refseq(Chloroplast_ps)))
+#when I blast the sequence of ASV_3085 I get match with Camelina sativa
+
+#ZSB-51 has a 0.4% plastid contamination. The next sample with the most plastid contamination has 0.08%
+
+# define host plant 16S contamination as metadata
+ps_Bac@sam_data$Mitochondria_reads<-sample_sums(Mitochondria_ps)
+ps_Bac@sam_data$Chloroplast_reads<-sample_sums(Chloroplast_ps)
+ps_Bac@sam_data$Plastid_reads<-sample_sums(host_plant_ps)
+ps_Bac@sam_data$Plastid_contamination_pct<-sample_sums(host_plant_ps)/sample_sums(ps_Bac)*100
+
+#Remove plastid ASVs
+# prune_taxa only works with those to keep not to "keep out", thus a little trick is needed
+# to make a new vector: https://github.com/joey711/phyloseq/issues/652
+
+plastid_taxa <- taxa_names(host_plant_ps)
+all_taxa <- taxa_names(ps_Bac)
+taxa_to_keep <- all_taxa[!all_taxa %in% plastid_taxa] 
+
+ps_Bac_plastid <- prune_taxa(taxa_to_keep, ps_Bac) #64647 taxa
+
+#compare 
+ps_Bac #old ps
+ps_Bac_plastid #new ps filtered without plastid reads (-354 ASVs) 20,565 ASVs
+
+mean(sample_sums(ps_Bac_plastid))/mean(sample_sums(ps_Bac))*100 #99% of reads kept
+
+#clean
+rm(Mitochondria_ps, Chloroplast_ps, host_plant_ps)
+   
+```
+
+## Low reads and non-informative ASVs
+
+```{r}
+#check number of reads after plastid dna removal
+sums <- sample_sums(ps_Bac_plastid)
+sums[order(sums)]
+
+#add number of reads after plastid
+ps_Bac_plastid@sam_data$libsize_after_plastid<-sample_sums(ps_Bac_plastid)
+
+#remove samples with low number of reads, removing those with less than 10,000 reads
+#as it jumps from 59 to 16,474 and continues to increase.
+ps_filtered <- subset_samples(ps_Bac_plastid, libsize_after_plastid > 10000) 
+
+#remove ASVs with low-length sequences
+#check final sequence length. 16S sequences smaller than 380bp should be discarded
+summary(ps_filtered@refseq@ranges@width) 
+hist(as.data.frame(refseq(ps_filtered)@ranges)$width, breaks = 50)
+
+#remove the ones smaller than 380bp (expected amplicon size)
+ps_filtered<- prune_taxa(taxa = as.data.frame(refseq(ps_filtered)@ranges)$width>380,
+                       x = ps_filtered) #21 ASVs removed
+
+#remove those ASVs with now 0 reads 
+prune_taxa(taxa_sums(ps_filtered) >0, ps_filtered)
+
+#let's see how many sequences were kept after this filtering
+sum(sample_sums(ps_filtered))/sum(sample_sums(ps_Bac_plastid))*100 # 99.99% of sequences kept
+
+#add column to sample_data
+ps_filtered@sam_data$libsize_after_filtering <- sample_sums(ps_filtered)
+
+#check how many reads were kept at the end
+ps_filtered@sam_data$pct_reads_kept <- ((ps_filtered@sam_data$libsize_after_filtering/ps_filtered@sam_data$Library_size)*100)
+
+summary(ps_filtered@sam_data$pct_reads_kept) #Min of 83.32% of the reads were kept
+
+```
+
+## Check filtering
+
+```{r}
+#make it a df to plot it 
+df_filtered <-data.frame(sample_data(ps_filtered))
+df_filtered <- tibble::rownames_to_column(df_filtered, "Sample_name") #row names into column
+order_samp_name <- df_filtered$Sample_name
+
+#make Harvest ID a factor to have a better plot
+df_filtered$Pot_number <- factor(df_filtered$Sample_name, levels=order_samp_name)
+
+#see it 
+ggplot(df_filtered, aes(x = pct_reads_kept, y = Sample_name, label = Sample_name)) +    
+       geom_point(aes(colour = Sample_type, shape = water_regime)) +
+       geom_text(aes(label = Sample_name), hjust = - 0.5)
+       #facet_wrap(~Experiment, scales="free_x")
+
+ggsave("Filtered_pctg_conta.png", path = "./5_Brassica_oleracea_exp/results/plots/exploration",
+         width = 40, height = 20 , units = "in", dpi=300, scale=0.3)
+
+
+```
+
+##Final ps
+```{r}
+#last check of filtering steps
+
+ps # 65,144 raw phyloseq object
+ps_decontam # 64,825 after decontam package
+ps_Bac # 64,761 after removing non-bacterial sequences
+ps_Bac_plastid # 64,674 after removing chloroplast and mitochondria contamination
+ps_filtered # 64,626 after removing non-informative sequences
+
+
+#save ps object 
+save(ps_filtered, file = "./5_Brassica_oleracea_exp/r_objects/ps_filtered.RData")
+load("./5_Brassica_oleracea_exp/r_objects/ps_filtered.RData")
+
+#clean
+rm(ps_16S_raw, ps_16S_decontam, ps_16S_plastid, ps_16S_filtering, plot_Bac)
+```
+
+##Normalize by library size
+
+```{r}
+ps_rel <- transform_sample_counts(ps_filtered, function(OTU) OTU/sum(OTU) )
+
+plot_Bac_rel <- plot_bar(ps_rel, fill= "Phylum")
+plot_Bac_rel <- plot_Bac_rel + facet_wrap(~Sample_type, nrow=1, scales="free_x")
+ggsave("Bac.rel_phylum.png", path = "./5_Brassica_oleracea_exp/results/plots/exploration",
+         width = 40, height = 20 , units = "in", dpi=300, scale=0.5)
+
+plot_Bac_rel <- plot_Bac_rel + facet_wrap(~water_regime, nrow=1, scales="free_x")
+
+#quick check on the number of reads 
+sums <- sample_sums(ps_rel)
+sums[order(sums)]
+
+sample_data(normalized_ps_phylum2_relabun)
+plot_bar(normalized_ps_phylum2_relabun, fill= "Phylum")
+
+## code from :https://github.com/joey711/phyloseq/issues/1701
+
+# To simplify the  data
+
+ps_filtered_DR <- subset_samples(ps_filtered, water_regime == "DR")
+ps_filtered_DR <- prune_taxa(taxa_sums(ps_filtered_DR) >0, ps_filtered_DR)
+
+ps_filtered_DR_bulk <- subset_samples(ps_filtered_DR, Sample_type == "bulk_soil")
+ps_filtered_DR_bulk <- prune_taxa(taxa_sums(ps_filtered_DR_bulk) >0, ps_filtered_DR_bulk)
+
+ps_rel_DR_bulk <- transform_sample_counts(ps_filtered_DR_bulk, function(OTU) OTU/sum(OTU) )
+
+# Merge sample by their treatment
+    merged_ps_DR_bulk = merge_samples(ps_rel_DR_bulk, "treatment") # summed
+    merged_ps_DR_bulk
+    
+  # Sample Data has Sample ID per row
+    normalized_ps_phylum1 = tax_glom(ps_rel_DR_bulk, "Phylum", NArm = TRUE)
+    normalized_ps_phylum1   
+    
+    
+    # Sample Data has Sample Type per row
+    normalized_ps_phylum2 = tax_glom(merged_ps_DR_bulk, "Phylum", NArm = TRUE)
+    normalized_ps_phylum2
+    
+    
+    normalized_ps_phylum1_relabun = transform_sample_counts(normalized_ps_phylum1, function(OTU) OTU/sum(OTU) * 100)
+    normalized_ps_phylum2_relabun = transform_sample_counts(normalized_ps_phylum2, function(OTU) OTU/sum(OTU) * 100)
+
+    psmelt(normalized_ps_phylum1_relabun) %>%
+            ggplot(aes(x = Sample, y = Abundance, fill = Phylum)) +
+            geom_bar(stat = "identity") +
+            theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+            labs(y = "Relative Abundance", title = "Phylum Relative Abundance")
+    
+    
+    psmelt(normalized_ps_phylum2_relabun) %>%
+            ggplot(aes(x = Sample, y = Abundance, fill = Phylum)) +
+            geom_bar(stat = "identity") +
+            theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+            labs(y = "Relative Abundance", title = "Phylum Relative Abundance")
+    
+    
+    ### make a new column by groups
+#make new column with unique groups by the combination of Water Regime & Sample Type & treatment
+sample_data(ps_filtered)$groups <- paste0(sample_data(ps_filtered)$water_regime, "_", phyloseq::sample_data(ps_filtered)$Sample_type, "_", phyloseq::sample_data(ps_filtered)$treatment)
+
+ps_rel <- transform_sample_counts(ps_filtered, function(OTU) OTU/sum(OTU) )
+sample_data(ps_rel)$groups <- paste0(sample_data(ps_rel)$water_regime, "_", phyloseq::sample_data(ps_rel)$Sample_type, "_", phyloseq::sample_data(ps_rel)$treatment)
+
+ # Merge sample by their sampling site
+    # Here we have 9 "samples" (SampleType)
+    merged_ps_phylum = merge_samples(ps_filtered, "groups") # summed
+    merged_ps_phylum
+
+     # Sample Data has Sample ID per row
+    normalized_ps_phylum1 = tax_glom(ps_filtered, "Phylum", NArm = TRUE)
+    normalized_ps_phylum1
+    
+     # Sample Data has Sample Type per row
+    normalized_ps_phylum2 = tax_glom(merged_ps_phylum, "Phylum", NArm = TRUE)
+    normalized_ps_phylum2
+    
+    
+    normalized_ps_phylum1_relabun = transform_sample_counts(normalized_ps_phylum1, function(OTU) OTU/sum(OTU) * 100)
+    normalized_ps_phylum2_relabun = transform_sample_counts(normalized_ps_phylum2, function(OTU) OTU/sum(OTU) * 100)
+
+    psmelt(normalized_ps_phylum1_relabun) %>%
+            ggplot(aes(x = Sample, y = Abundance, fill = Phylum)) +
+            geom_bar(stat = "identity") +
+            theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+            labs(y = "Relative Abundance", title = "Phylum Relative Abundance")
+    
+    
+    normalized_ps_phylum2_relabun@sam_data$groups <- factor(normalized_ps_phylum2_relabun@sam_data$groups, c("WW_bulk_soil_Control", "WW_bulk_soil_WCS417", "WW_bulk_soil_WCS315", "WW_bulk_soil_CHA0", "WW_rhizosphere_Control", "WW_rhizosphere_WCS417", "WW_rhizosphere_WCS315", "WW_rhizosphere_CHA0", "DR_bulk_soil_Control", "DR_bulk_soil_WCS417", "DR_bulk_soil_WCS315", "DR_bulk_soil_CHA0", "DR_rhizosphere_Control", "DR_rhizosphere_WCS417", "DR_rhizosphere_WCS315", "DR_rhizosphere_CHA0"))
+
+    psmelt(normalized_ps_phylum2_relabun) %>%
+            ggplot(aes(x = Sample, y = Abundance, fill = Phylum)) +
+            scale_fill_manual(values = color_phylum) +
+            geom_bar(stat = "identity") +
+            theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+            labs(y = "Relative Abundance", title = "Phylum Relative Abundance")
+    
+    
+    colourCount <- 44 #number of Phyla
+color_phylum  <- colorRampPalette(brewer.pal(12, "Spectral"))(colourCount)
+
+    
+  sample_data(normalized_ps_phylum2_relabun)
+```
