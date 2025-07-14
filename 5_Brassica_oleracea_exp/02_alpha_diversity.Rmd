@@ -57,8 +57,8 @@ load("./5_Brassica_oleracea_exp/r_objects/ps_filtered.RData")
 
 #We will only use the samples from the bulk soil
 
-ps_filtered_bulk <-  subset_samples(ps_filtered, Sample_type %in% "bulk_soil")
-ps_filtered_bulk <- prune_taxa(taxa_sums(ps_filtered_bulk) >0, ps_filtered_bulk)
+ps_filtered_root <-  subset_samples(ps_filtered, Sample_type %in% "root_associated")
+ps_filtered_root <- prune_taxa(taxa_sums(ps_filtered_root) >0, ps_filtered_root)
 
 rm(ps_filtered)
 ```
@@ -67,14 +67,14 @@ rm(ps_filtered)
 ```{r}
 
 # Calculate alpha diversity with phyloseq
-alpha_div <- estimate_richness(ps_filtered_bulk, measures = c("Shannon", "Simpson", "Observed"))
+alpha_div <- estimate_richness(ps_filtered_root, measures = c("Shannon", "Simpson", "Observed"))
 
 # Add sample names
 alpha_div$Sample <- rownames(alpha_div)
 rownames(alpha_div) <- gsub("\\.", "-", rownames(alpha_div)) #fix sample names
 
 #add metadata
-metadata <- as.data.frame(as.matrix(sample_data(ps_filtered_bulk)))
+metadata <- as.data.frame(as.matrix(sample_data(ps_filtered_root)))
 metadata <- metadata[, 1:4] #keep usefull columns
 str(metadata)
 
