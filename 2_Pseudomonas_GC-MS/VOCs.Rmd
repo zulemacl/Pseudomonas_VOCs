@@ -1,0 +1,241 @@
+---
+title: "VOCs"
+author: "Zulema Carracedo Lorenzo"
+date: "2024-06-10"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages
+
+```{r}
+#data management
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(stringr)
+library(readxl)
+
+#statistics
+library(multcompView)
+library(vegan)
+library(pairwiseAdonis)
+
+#plots
+library(ggplot2)
+
+#for exporting tables 
+library(flextable)
+library(officer)
+```
+
+#Code from Roland
+
+##Import data
+
+```{r}
+
+
+#load metadata
+
+# load csv with metadata (trap ID and strain) 
+vocs_metadata <- read_excel("2_Pseudomonas_GC-MS/data/metadata.xlsx")
+
+# Use trap id as row index
+vocs_metadata <- data.frame(vocs_metadata)
+rownames(vocs_metadata) <- vocs_metadata$ID
+
+# Remove explicit trap id column
+vocs_metadata <- subset(vocs_metadata, select = strain)
+
+#load GC-MS data
+
+gcms_data <- read_csv("2_Pseudomonas_GC-MS/data/with_blanck_transfrmed.csv")
+gcms_data <- data.frame(gcms_data) 
+rownames(gcms_data) <- gcms_data$...1
+gcms_data <- gcms_data[, -1]  #remove first colum
+gcms_data <- t(gcms_data) #trap ID to rowname
+gcms_data <- data.frame(gcms_data)
+
+str(vocs_metadata)
+str(gcms_data)
+
+rownames(vocs_metadata)
+rownames(gcms_data)
+
+```
+
+##PCA calculation
+
+```{r}
+
+# join metadata and GC-MS data
+
+#i need to have rownames as columns for that
+vocs_metadata <- rownames_to_column(vocs_metadata, var= "ID")
+gcms_data <- rownames_to_column(gcms_data, var= "ID")
+
+vocs_pca <- merge(vocs_metadata, gcms_data, by = "ID")
+vocs_pca <- vocs_pca[,-1]
+
+# calculate PCA
+pca_res <- prcomp(vocs_pca[, 2:ncol(vocs_pca)], scale. = TRUE) # "scale. = TRUE" indicates that the variables should be scaled to have unit variance before calculating principle components. we start at column 2 to exclude the metadata columns
+
+# make data frame with pseudomonas strain and PCs
+PCi <- data.frame(pca_res$x, strain=vocs_pca$strain)
+
+# extract proportion of variance explained by each PC
+pca_prop_variance <- summary(pca_res)$importance["Proportion of Variance",]
+# change it to percentages and round to 1 decimal
+pca_prop_variance <- round(pca_prop_variance*100, digits=1)
+  
+```
+
+##PCA plot
+
+```{r}
+
+PCi$strain <- factor(PCi$strain, c("Control", "WCS417", "WCS315", "CHA0")) #order matters for plots
+
+PCA <- ggplot(PCi,aes(x=PC1,y=PC2,color=strain))+
+  geom_point(size=8)+
+  scale_color_manual(values = c("#76CFE8", "#C9DC53", "#F99F58", "#9771A5"))+
+  xlab(paste0("PC1 [", pca_prop_variance["PC1"], "%]"))+ # add percent variance explained by PC1 on x-axis label
+  ylab(paste0("PC2 [", pca_prop_variance["PC2"], "%]")) + # add percent variance explained by PC2 on y-axis label
+   guides(fill=guide_legend(override.aes=list(shape=21)))+
+  #guides(color=guide_legend(override.aes=list(shape=21))) +
+  #guides(fill=guide_legend(override.aes=list(shape=21,fill=c("#FFFF99","#A6CEE3","#B2DF8A","#CAB2D6"),color=c("#1F78B4","#E31A1C")))) +
+  theme_bw(18) +
+  labs(color = "Pseudomonas strain",) +
+  #guides(fill= "none") +
+  theme(axis.line = element_line(colour = "black"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank()) 
+
+ggsave("PCA.pdf", width = 40, height = 20, units = "cm", dpi=800)
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./2_Pseudomonas_GC-MS/results/plots",
+  scale = 1,
+  width = 40,
+  height = 20,
+  units = "cm",
+  dpi = 300),
+x=c("Fig.1b_PC.svg","Fig.1b_PC.png"))
+ 
+
+```
+
+## calculate metabolome dissimilarities between samples
+
+```{r}
+#the trap ID must be in the same order in the euclidean distances than in the vocs_metadata dataframe
+vocs_metadata <- rownames_to_column(vocs_metadata, var= "ID")
+gcms_data <- rownames_to_column(gcms_data, var= "ID")
+
+merged_data <- merge(vocs_metadata, gcms_data, by = "ID")
+
+
+#now split again to have them i the same ID order
+vocs_metadata <- merged_data[, 1:2]
+gcms_data <- merged_data
+gcms_data <- column_to_rownames(gcms_data, var = "ID")
+gcms_data <- gcms_data[,-1]
+
+# now the orher is the same for both dataframes
+
+
+# Euclidean distances (Bray curtis can't be used when negative values)
+
+euclidean_dist <- vegdist(gcms_data, method = "euclidean")
+
+```
+
+##Permanova
+
+```{r}
+#the trap ID must be in the same order in the euclidean distances than in the vocs_metadata dataframe
+
+#Order was arrange in the previous chunk, see lines 126-136
+
+#Run permanova with adonis2
+set.seed(3848)
+permanova <- adonis2(euclidean_dist ~ strain, 
+        data = vocs_metadata,
+        permutations = 9999)
+
+#save output 
+# Convert output to data frame
+permanova_df <- as.data.frame(permanova)
+permanova_df$Factor <- rownames(permanova_df)
+permanova_df <- permanova_df[, c("Factor", setdiff(names(permanova_df), "Factor"))]
+
+# Round values
+permanova_df$`Pr(>F)` <- formatC(permanova_df$`Pr(>F)`, format = "f", digits = 3)
+permanova_df$R2 <- round(permanova_df$R2, 3)
+permanova_df$F <- round(permanova_df$F, 2)
+permanova_df$SumOfSqs <- round(permanova_df$SumOfSqs, 2)
+
+# Create styled flextable
+permanova_ft <- flextable(permanova_df) |>
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ `Pr(>F)` < 0.05, part = "body") |>
+  set_header_labels(
+    Factor = "Factor", Df = "DF", SumOfSqs = "Sum Sq",
+    R2 = "R²", F = "F-value", `Pr(>F)` = "p-value"
+  )
+
+# Export to Word
+doc <- read_docx() |>
+  body_add_par("Table: PERMANOVA Results (Bray-Curtis Dissimilarity)", style = "heading 2") |>
+  body_add_flextable(permanova_ft)
+
+print(doc, target = "PERMANOVA.docx")
+
+#pairwise adonis
+
+pairwise_results<-pairwise.adonis2(euclidean_dist ~ strain, data = vocs_metadata)
+
+#save table for publication 
+
+# Convert results to data frame
+pairwise_df <- do.call(rbind, pairwise_results[-1])  # skip $parent_call
+pairwise_df$Comparison <- names(pairwise_results)[-1]
+pairwise_df <- pairwise_df[, c("Comparison", names(pairwise_df)[1:(ncol(pairwise_df)-1)])]
+
+# Make table
+pairwise_ft <- flextable(pairwise_df) |>
+  autofit() |>
+  theme_booktabs() |>
+  bold(i = ~ `Pr(>F)` < 0.05, part = "body") |>
+  set_header_labels(
+    Comparison = "Comparison",
+    Df = "DF",
+    SumOfSqs = "Sum Sq",
+    R2 = "R²",
+    F = "F-value",
+    `Pr(>F)` = "p-value"
+  )
+
+# Export
+doc <- read_docx() |>
+  body_add_par("Table: Pairwise PERMANOVA Results", style = "heading 2") |>
+  body_add_flextable(pairwise_ft)
+
+print(doc, target = "pairwise_PERMANOVA.docx")
+
+
+
+```
+
