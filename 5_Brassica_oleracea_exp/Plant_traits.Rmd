@@ -1,0 +1,349 @@
+---
+title: "Plant_traits"
+author: "Zulema Carracedo Lorenzo"
+date: "2025-07-14"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+##Load packages
+```{r}
+library(readr)
+library(ggplot2)
+library(multcompView)
+library(dplyr)
+library(ggpattern) #for patterns inside boxplot
+library(RColorBrewer)
+library(car)
+library(pgirmess)
+library(reshape2)
+library(flextable)
+library(officer)
+```
+
+#Load data and set factor order
+```{r}
+data <- read.csv("./5_Brassica_oleracea_exp/data/Split pot June July 2022.csv")
+
+data <- data %>% 
+  mutate("Pseudomonas strain" =
+           if_else(treatment == "WCS417", "PsWCS417",
+                    if_else(treatment == "WCS315", "PsWCS315",
+                             if_else(treatment == "CHA0", "PsCHA0", "Control"))))
+
+data$Comb <- paste(data$`Pseudomonas strain`, data$water_regime, sep= "-")
+
+data$treatment <- factor(data$treatment, levels=c("Control", "WCS417", "WCS315", "CHA0"))
+data$water_regime <- factor(data$water_regime, levels=c("WW", "DR"))
+data$`Pseudomonas strain` <- factor(data$`Pseudomonas strain`, levels=c("Control", "PsWCS417", "PsWCS315", "PsCHA0"))
+
+```
+
+#Plots
+
+```{r}
+ggplot(data, aes(x = `Pseudomonas strain`, y = FW_shoot_g, pattern = water_regime, fill = `Pseudomonas strain`)) +
+  scale_fill_manual(name = "Pseudomonas strain", values = c("#76CFE8", "#C9DC53", "#F99F58", "#9771A5")) +
+  geom_boxplot_pattern( position = position_dodge(preserve = "single"),
+                        color = "black", 
+                        pattern_fill = "black", 
+                        pattern_angle = 45, 
+                        pattern_density = 0.05, 
+                        pattern_spacing = 0.01,
+                        pattern_key_scale_factor = 0.6,
+                        outlier.shape = NA) +
+  scale_pattern_manual(values = c(DR = "stripe", WW = "none")) +
+  guides(pattern = guide_legend(override.aes = list(fill = "white")), fill = guide_legend(override.aes = list(pattern = "none"))) +
+  ylab("Shoot fresh weight (g)") +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(18) + 
+  theme(legend.position="top") +
+  labs(fill = "Pseudomonas strain", pattern = " ") +
+  guides(fill= FALSE) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 55)) 
+
+mapply(function(x)
+  ggsave(
+    plot = last_plot(),
+    filename =x,
+    path = "./5_Brassica_oleracea_exp/results/plots/plant_traits",
+    scale = 1.8,
+    width = 100,
+    height = 100,
+    units = "mm",
+    dpi = 300),
+  x=c("Fig.5c_left.svg","Fig.5c_left.png"))
+
+# Samples pot number 9, 12 and 26 have a strange DW parameter. Better to take them out for the DW and DW/FW ratio assessment 
+
+data2 <- subset(data, !(Pot_number %in% c('9','12','26')))
+
+data2 <- data2 %>% 
+  mutate(alias =
+           if_else(treatment == "WCS417", "Ps1",
+                   if_else(treatment == "WCS315", "Ps2",
+                           if_else(treatment == "CHA0", "Ps3", "Control"))))
+
+#shoot water %
+
+ggplot(data2, aes(x = `Pseudomonas strain`, y = water_content_pct, pattern = water_regime, fill = `Pseudomonas strain`)) +
+  scale_fill_manual(name = "Pseudomonas strain", values = c("#FFFF99", "#A6CEE3", "#B2DF8A", "#CAB2D6")) +
+  geom_boxplot_pattern( position = position_dodge(width=0.8),
+                        color = "black", 
+                        pattern_fill = "black", 
+                        pattern_angle = 45, 
+                        pattern_density = 0.05, 
+                        pattern_spacing = 0.01,
+                        pattern_key_scale_factor = 0.6,
+                        outlier.shape = NA) +
+  scale_pattern_manual(values = c(DR = "stripe", WW = "none")) +
+  guides(pattern = guide_legend(override.aes = list(fill = "white")), fill = guide_legend(override.aes = list(pattern = "none"))) +
+  #scale_y_continuous(expand=c(0, 0), limits=c(0, 90)) +
+  ylab("Shoot water content (%)") +
+  geom_point(position = position_jitterdodge(), alpha=0.7, size = 2) + 
+  theme_bw(18) + 
+  theme(legend.position="top") +
+  labs(fill = "Pseudomonas strain", pattern = " ") +
+  guides(fill= "none") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+
+mapply(function(x)
+  ggsave(
+    plot = last_plot(),
+    filename =x,
+    path = "./5_Brassica_oleracea_exp/results/plots/plant_traits",
+    scale = 1.8,
+    width = 100,
+    height = 100,
+    units = "mm",
+    dpi = 300),
+  x=c("Fig.5c_right.svg","Fig.5c_right.png"))
+
+```
+
+#Statistics
+##shoot FW
+```{r}
+# test assumption for ANOVA: equal variances (homoscedasticity)
+# Levene's test
+leveneTest((FW_shoot_g) ~ water_regime * treatment , data = data)
+# no significant heteroscedasticity
+
+
+# test assumption for ANOVA: normal distribution of residuals
+lm1 <- lm((FW_shoot_g) ~ water_regime * treatment , data = data)
+residuals <- lm1$residuals # extract residuals
+hist(residuals) # histogram of residuals
+shapiro.test(residuals) # normality test for residuals
+qqnorm(residuals) # QQ plot of residuals
+qqline(residuals) # add line to QQ plot
+# residuals are normally distributed
+
+#the data is not normal distributed (saphiro test is significant). I will then use Kruskal, and because it only accepts one factor I will combine my samples in a single column
+
+#kruska- wallis
+kruskal <- kruskal.test(FW_shoot_g ~ Comb, data = data)
+
+# Extract results into a data frame
+kruskal_df <- data.frame(
+  Statistic = round(kruskal$statistic, 2),
+  DF = kruskal$parameter,
+  P_value = formatC(kruskal$p.value, format = "f", digits = 3)
+)
+
+# Create flextable
+kruskal_ft <- flextable(kruskal_df) |>
+  theme_booktabs() |>
+  autofit() |>
+  set_header_labels(
+    Statistic = "Kruskal-Wallis ???", DF = "df", P_value = "p-value"
+  )
+
+
+#Pairwise comparisons with Wilcoxon test
+wilcox <- pairwise.wilcox.test(data$FW_shoot_g, data$Comb,
+                               p.adjust.method = "BH")
+
+# Convert triangular matrix to full matrix
+wilcox_matrix <- tri.to.squ(wilcox$p.value)
+wilcox_df <- as.data.frame(wilcox_matrix)
+wilcox_df$Comparison <- rownames(wilcox_df)
+
+# Pivot longer for a flat table format (optional but cleaner)
+library(tidyr)
+wilcox_long <- pivot_longer(wilcox_df, -Comparison, names_to = "Group", values_to = "p.value")
+wilcox_long$p.value <- formatC(wilcox_long$p.value, format = "f", digits = 3)
+
+# Create flextable
+wilcox_ft <- flextable(wilcox_long) |>
+  theme_booktabs() |>
+  autofit() |>
+  bold(i = ~ as.numeric(p.value) < 0.05, part = "body")
+
+#Extract letters from the groups
+
+tri.to.squ<-function(x)
+{
+  rn<-row.names(x)
+  cn<-colnames(x)
+  an<-unique(c(cn,rn))
+  myval<-x[!is.na(x)]
+  mymat<-matrix(1,nrow=length(an),ncol=length(an),dimnames=list(an,an))
+  for(ext in 1:length(cn))
+  {
+    for(int in 1:length(rn))
+    {
+      if(is.na(x[row.names(x)==rn[int],colnames(x)==cn[ext]])) next
+      mymat[row.names(mymat)==rn[int],colnames(mymat)==cn[ext]]<-x[row.names(x)==rn[int],colnames(x)==cn[ext]]
+      mymat[row.names(mymat)==cn[ext],colnames(mymat)==rn[int]]<-x[row.names(x)==rn[int],colnames(x)==cn[ext]]
+    }
+    
+  }
+  return(mymat)
+}  #function to extract letters from significance values of wilcoxon test
+
+mymat<-tri.to.squ(wilcox$p.value)
+
+myletters<-multcompLetters(mymat)
+
+# Convert letter list to a data frame
+cld_df <- data.frame(Group = names(myletters$Letters), Letters = myletters$Letters)
+
+# Create flextable
+cld_ft <- flextable(cld_df) |>
+  theme_booktabs() |>
+  autofit()
+
+#Extract to word
+doc <- read_docx() |>
+  body_add_par("Table 1: Kruskal-Wallis Test Result", style = "heading 2") |>
+  body_add_flextable(kruskal_ft) |>
+  
+  body_add_par("Table 2: Pairwise Wilcoxon Test (BH Adjusted)", style = "heading 2") |>
+  body_add_flextable(wilcox_ft) |>
+  
+  body_add_par("Table 3: Compact Letter Display (CLD)", style = "heading 2") |>
+  body_add_flextable(cld_ft)
+
+print(doc, target = "Kruskal_Wilcoxon_results_shoot_FW.docx")
+
+```
+
+##shoot water %
+
+```{r}
+# test assumption for ANOVA: equal variances (homoscedasticity)
+# Levene's test
+leveneTest((water_content_pct) ~ water_regime * treatment , data = data2)
+# no significant heteroscedasticity
+
+
+# test assumption for ANOVA: normal distribution of residuals
+lm1 <- lm((water_content_pct) ~ water_regime * treatment , data = data2)
+residuals <- lm1$residuals # extract residuals
+hist(residuals) # histogram of residuals
+shapiro.test(residuals) # normality test for residuals
+qqnorm(residuals) # QQ plot of residuals
+qqline(residuals) # add line to QQ plot
+# residuals are normally distributed
+
+#the data is  normal distributed , but are 6 replicates enough? I will see which the results are when using Kruskal + wilcoxon and because it only accepts one factor I will combine my samples in a single column
+
+#kruskal-Wallis
+kruskal <- kruskal.test(water_content_pct ~ Comb, data = data2)
+
+# Extract results into a data frame
+kruskal_df <- data.frame(
+  Statistic = round(kruskal$statistic, 2),
+  DF = kruskal$parameter,
+  P_value = formatC(kruskal$p.value, format = "f", digits = 3)
+)
+
+# Create flextable
+kruskal_ft <- flextable(kruskal_df) |>
+  theme_booktabs() |>
+  autofit() |>
+  set_header_labels(
+    Statistic = "Kruskal-Wallis ???", DF = "df", P_value = "p-value"
+  )
+
+
+#Pairwise with wilcoxon
+wilcox <- pairwise.wilcox.test(data2$water_content_pct, data2$Comb,
+                               p.adjust.method = "BH")
+
+# Convert triangular matrix to full matrix
+wilcox_matrix <- tri.to.squ(wilcox$p.value)
+wilcox_df <- as.data.frame(wilcox_matrix)
+wilcox_df$Comparison <- rownames(wilcox_df)
+
+# Pivot longer for a flat table format (optional but cleaner)
+library(tidyr)
+wilcox_long <- pivot_longer(wilcox_df, -Comparison, names_to = "Group", values_to = "p.value")
+wilcox_long$p.value <- formatC(wilcox_long$p.value, format = "f", digits = 3)
+
+# Create flextable
+wilcox_ft <- flextable(wilcox_long) |>
+  theme_booktabs() |>
+  autofit() |>
+  bold(i = ~ as.numeric(p.value) < 0.05, part = "body")
+
+#extract groups
+mymat<-tri.to.squ(wilcox$p.value)
+
+myletters<-multcompLetters(mymat)
+
+# Convert letter list to a data frame
+cld_df <- data.frame(Group = names(myletters$Letters), Letters = myletters$Letters)
+
+# Create flextable
+cld_ft <- flextable(cld_df) |>
+  theme_booktabs() |>
+  autofit()
+
+#export to word
+doc <- read_docx() |>
+  body_add_par("Table 1: Kruskal-Wallis Test Result", style = "heading 2") |>
+  body_add_flextable(kruskal_ft) |>
+  
+  body_add_par("Table 2: Pairwise Wilcoxon Test (BH Adjusted)", style = "heading 2") |>
+  body_add_flextable(wilcox_ft) |>
+  
+  body_add_par("Table 3: Compact Letter Display (CLD)", style = "heading 2") |>
+  body_add_flextable(cld_ft)
+
+print(doc, target = "Kruskal_Wilcoxon_results_shoot_WC.docx")
+
+
+
+
+```
+
