@@ -1,0 +1,707 @@
+---
+title: "04_differential_abundance_ANCOMBC"
+author: "Zulema Carracedo Lorenzo"
+date: "2025-03-12"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+#Load packages
+```{r}
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(vegan)
+library(UpSetR)
+library(purrr)
+library(tibble)
+library(tidyr)
+library(usefun)
+library(writexl)
+
+#Differential abundance
+library(metagMisc) #for CSS transformation & prevalence filter
+library(metagenomeSeq)
+library(DESeq2) #differential abundance
+library(zinbwave) #zero-inflated
+library(ANCOMBC) #ANCOM
+#library(GUniFrac) #ZicoSeq & rarefaction PROBLEM
+library(ALDEx2) #Aldex2
+library(Maaslin2) #MaAslin2
+#library(corncob) #not able to install
+
+#Heatmaps
+library(ComplexHeatmap)
+
+```
+
+#Load phyloseq object
+```{r}
+#For differential abundance analysis we use an unnormalize phyloseq object
+
+load("./5_Brassica_oleracea_exp/r_objects/ps_filtered.RData") 
+
+#We will only use the samples from the root soil
+
+ps_filtered_root <-  subset_samples(ps_filtered, Sample_type %in% "root_associated")
+ps_filtered_root <- prune_taxa(taxa_sums(ps_filtered_root) >0, ps_filtered_root)
+
+rm(ps_filtered)
+```
+
+#Define pairwise comparisons
+```{r}
+
+#We need to divide our data into WW and DR
+
+ps_WW_root <- subset_samples(ps_filtered_root, water_regime %in% "WW")
+ps_WW_root <- prune_taxa(taxa_sums(ps_WW_root) >0, ps_WW_root)
+
+ps_DR_root <- subset_samples(ps_filtered_root, water_regime %in% "DR")
+ps_DR_root <- prune_taxa(taxa_sums(ps_DR_root) >0, ps_DR_root)
+
+
+```
+
+
+
+# Filtering low prevalence taxa
+
+```{r}
+ps_filtered_root #48,027 ASV
+
+### WW ###
+ps_WW_root #34,464 ASVs
+
+#First, check how many zero's
+zero_percentage <- function(x){
+   df <- data.frame(otu_table(x))
+   zero_percentage <- (sum(colSums(df == 0))) / (nrow(df) * ncol(df))
+   return(zero_percentage)
+}
+
+zero_percentage(ps_WW_root) #84.31%
+
+# Now, drop taxa present in at least 20% of the samples
+ps_WW_root_f <- metagMisc::phyloseq_filter_prevalence(ps_WW_root, prev.trh = 0.20, #at least 20% of samples
+                                          abund.trh = NULL) #no filtering by abundance 
+
+#check
+ps_WW_root_f #6,846 ASVs
+
+zero_percentage(ps_WW_root_f) # 43.75%
+
+
+### DR ###
+ps_DR_root #29,367 ASVs
+
+#First, check how many zero's
+zero_percentage(ps_DR_root) #83.15%
+
+# Now, drop taxa present in at least 20% of the samples
+ps_DR_root_f <- metagMisc::phyloseq_filter_prevalence(ps_DR_root, prev.trh = 0.20, #at least 20% of samples
+                                          abund.trh = NULL) #no filtering by abundance 
+
+#check
+ps_DR_root_f #6,122 ASVs
+
+zero_percentage(ps_DR_root_f) # 41.34%
+
+rm(ps_WW_root,ps_DR_root)
+
+
+```
+
+
+# 1. ANCOM-BC
+
+ANCOM-BC (Analysis of Compositions of Microbiomes with Bias Correction) is a method that takes into account the compositionality of microbiome data by using an additive log-ratio transformation. A ratio is calculated for each taxon with a reference taxon with low variance present across all samples. The differences between the ratios are compared and tested statistically to determine whether a taxon is DA between two conditions or not. It is considered a stringent method. Input is non-rarefied data. 
+
+This is a good explanation of ANCOM-BC : https://github.com/FrederickHuangLin/ANCOM-BC-Code-Archive
+
+##WW
+```{r}
+
+# Note that by default, levels of a categorical variable in R are sorted alphabetically. In this case, the reference level for `treatment` will be`CHA0`. To manually change the reference level, use:
+
+ps_WW_root_f@sam_data$treatment = factor(ps_WW_root_f@sam_data$treatment, levels = c("Control", "WCS417", "WCS315", "CHA0"))
+
+# You can verify the change by checking:
+levels(ps_WW_root_f@sam_data$treatment)
+
+#Calculate ANCOm-BC
+
+  
+  set.seed(123)
+  ancom <- ancombc(phyloseq = ps_WW_root_f, 
+                      formula = "treatment", 
+                      p_adj_method = "fdr", #same as "BH" Benjamini & Hochberg
+                      zero_cut = 0.9, #we are removing ASVs that have more than 90% of 0s
+                      lib_cut = 0, 
+                      group = "treatment", 
+                      struc_zero = TRUE, #with structural zero's
+                      neg_lb = FALSE, #classifies structural zero's if it's zero and not its asymptotic lower bound 
+                      tol = 1e-5,               
+                      max_iter = 100, 
+                      conserve = TRUE, 
+                      alpha = 0.05)
+
+  save(ancom, file="./5_Brassica_oleracea_exp/r_objects/ancom_bc_root_WW.RData")
+  load(file="./5_Brassica_oleracea_exp/r_objects/ancom_bc_root_WW.RData")
+  
+  #get results from ANCOM-BC into df
+ df_ancom_WW <- data.frame(
+  ASV = row.names(ancom$res$beta), #get ASV names
+  lfc = unlist(ancom$res$beta),
+  se = unlist(ancom$res$se),
+  W = unlist(ancom$res$W),
+  p_val = unlist(ancom$res$p_val),
+  q_val = unlist(ancom$res$q_val),
+  diff_abn = unlist(ancom$res$diff_abn))
+ 
+ #Row names to column and fix teatment names
+ 
+ df_ancom_WW <- rownames_to_column(df_ancom_WW)
+ 
+ df_ancom_WW <- df_ancom_WW %>% rename("rowname" = "treatment")
+ 
+df_ancom_WW <- df_ancom_WW %>%
+   mutate(Treatment =
+            case_when(grepl("WCS417", df_ancom_WW$treatment) ~  "WCS417",
+                      grepl("WCS315", df_ancom_WW$treatment) ~  "WCS315",
+                     grepl("CHA0", df_ancom_WW$treatment) ~  "CHA0" 
+                      ))
+
+df_ancom_WW <- df_ancom_WW[,2:9] #removes wrong treatment column
+
+#store in a list a singel dataframe per treatment
+
+df_ancom_WW_417 <- df_ancom_WW %>% filter(Treatment == "WCS417")
+df_ancom_WW_315 <- df_ancom_WW %>% filter(Treatment == "WCS315")
+df_ancom_WW_CHA0 <- df_ancom_WW %>% filter(Treatment == "CHA0")
+
+df_ancom_WW_root_l <- list(df_ancom_WW_417, df_ancom_WW_315, df_ancom_WW_CHA0)
+names(df_ancom_WW_root_l) <- c("WCS417", "WCS315", "CHA0")
+
+rm(df_ancom_WW_417, df_ancom_WW_315, df_ancom_WW_CHA0) 
+
+#place ASVs as rownames, for some reason didn't allow me to do it with lapply
+
+  df_ancom_WW_root_l$WCS417 <- df_ancom_WW_root_l$WCS417 %>% 
+              remove_rownames()%>%
+              column_to_rownames(var="ASV")
+
+  df_ancom_WW_root_l$WCS315 <- df_ancom_WW_root_l$WCS315 %>% 
+              remove_rownames()%>%
+              column_to_rownames(var="ASV")
+  
+    df_ancom_WW_root_l$CHA0 <- df_ancom_WW_root_l$CHA0 %>% 
+              remove_rownames()%>%
+              column_to_rownames(var="ASV")
+    
+  
+  #join df's from ANCOMBC and phyloseq
+    
+  df_ancom_WW_root_l$WCS417  <- cbind(as(df_ancom_WW_root_l$WCS417, "data.frame"),
+                  as(tax_table(ps_WW_root_f)[rownames(df_ancom_WW_root_l$WCS417), ], "matrix"))
+  
+  df_ancom_WW_root_l$WCS315  <- cbind(as(df_ancom_WW_root_l$WCS315, "data.frame"),
+                  as(tax_table(ps_WW_root_f)[rownames(df_ancom_WW_root_l$WCS315), ], "matrix"))
+  
+  df_ancom_WW_root_l$CHA0  <- cbind(as(df_ancom_WW_root_l$CHA0, "data.frame"),
+                  as(tax_table(ps_WW_root_f)[rownames(df_ancom_WW_root_l$CHA0), ], "matrix"))
+
+  
+  #keep only those with adjusted p value of <0.05 ("q_val") 
+
+  
+  df_ancom_WW_ps_sig_WCS417 <- df_ancom_WW_root_l$WCS417 %>% 
+   dplyr::filter(q_val < 0.05)%>%
+   mutate(test="3_ancombc") #1045
+  
+    df_ancom_WW_ps_sig_WCS315 <- df_ancom_WW_root_l$WCS315 %>% 
+   dplyr::filter(q_val < 0.05)%>%
+   mutate(test="3_ancombc") #627
+    
+      df_ancom_WW_ps_sig_CHA0 <- df_ancom_WW_root_l$CHA0 %>% 
+   dplyr::filter(q_val < 0.05)%>%
+   mutate(test="3_ancombc") #629
+  
+df_ancom_WW_ps_sig_l <- list(df_ancom_WW_ps_sig_WCS417, df_ancom_WW_ps_sig_WCS315, df_ancom_WW_ps_sig_CHA0) #list of lists of significant ASVs detectec by ANCOM by each treatment
+
+names(df_ancom_WW_ps_sig_l) <- c("WCS417", "WCS315", "CHA0")
+
+
+
+#
+#check how many DA asvs were
+
+sum(df_ancom_WW_root_l$WCS417$diff_abn == "TRUE") #1,045
+sum(df_ancom_WW_root_l$WCS315$diff_abn == "TRUE") #627
+sum(df_ancom_WW_root_l$CHA0$diff_abn == "TRUE") #629
+
+#Save test results and significan ASV list in a single object
+
+ancombc_WW_l <- list(results= df_ancom_WW_root_l, df_sig_asv_l = df_ancom_WW_ps_sig_l)
+
+
+##Save
+#save(ancom_bc_l, file="./results/r_objects/differential_abundance/1_ancombc_l.RData")
+#load(file="./results/r_objects/differential_abundance/1_ancombc_l.RData")
+
+#save list of ASVs per strains
+ancombc_WW_WCS417 <- ancombc_WW_l$df_sig_asv_l$WCS417
+write_xlsx(ancombc_WW_WCS417, "./5_Brassica_oleracea_exp/results/tables/diff_abundance/ancombc_WW_WCS417.xlsx")
+
+ancombc_WW_WCS315 <- ancombc_WW_l$df_sig_asv_l$WCS315
+write_xlsx(ancombc_WW_WCS315, "./5_Brassica_oleracea_exp/results/tables/diff_abundance/ancombc_WW_WCS315.xlsx")
+
+ancombc_WW_CHA0 <- ancombc_WW_l$df_sig_asv_l$CHA0
+write_xlsx(ancombc_WW_CHA0, "./5_Brassica_oleracea_exp/results/tables/diff_abundance/ancombc_WW_CHAO.xlsx")
+
+         
+```
+
+##DR
+```{r}
+
+# Note that by default, levels of a categorical variable in R are sorted alphabetically. In this case, the reference level for `treatment` will be`CHA0`. To manually change the reference level, use:
+
+ps_DR_root_f@sam_data$treatment = factor(ps_DR_root_f@sam_data$treatment, levels = c("Control", "WCS417", "WCS315", "CHA0"))
+
+# You can verify the change by checking:
+levels(ps_DR_root_f@sam_data$treatment)
+
+#Calculate ANCOm-BC
+
+  
+  set.seed(123)
+  ancom <- ancombc(phyloseq = ps_DR_root_f, 
+                      formula = "treatment", 
+                      p_adj_method = "fdr", #same as "BH" Benjamini & Hochberg
+                      zero_cut = 0.9, #we are removing ASVs that have more than 90% of 0s
+                      lib_cut = 0, 
+                      group = "treatment", 
+                      struc_zero = TRUE, #with structural zero's
+                      neg_lb = FALSE, #classifies structural zero's if it's zero and not its asymptotic lower bound 
+                      tol = 1e-5,               
+                      max_iter = 100, 
+                      conserve = TRUE, 
+                      alpha = 0.05)
+
+  save(ancom, file="./5_Brassica_oleracea_exp/r_objects//ancom_bc_root_DR.RData")
+  load(file="./5_Brassica_oleracea_exp/r_objects//ancom_bc_root_DR.RData")
+  
+  #get results from ANCOM-BC into df
+ df_ancom_DR <- data.frame(
+  ASV = row.names(ancom$res$beta), #get ASV names
+  lfc = unlist(ancom$res$beta),
+  se = unlist(ancom$res$se),
+  W = unlist(ancom$res$W),
+  p_val = unlist(ancom$res$p_val),
+  q_val = unlist(ancom$res$q_val),
+  diff_abn = unlist(ancom$res$diff_abn))
+ 
+ #Row names to column and fix teatment names
+ 
+ df_ancom_DR <- rownames_to_column(df_ancom_DR)
+ 
+ df_ancom_DR <- df_ancom_DR %>% rename("rowname" = "treatment")
+ 
+df_ancom_DR <- df_ancom_DR %>%
+   mutate(Treatment =
+            case_when(grepl("WCS417", df_ancom_DR$treatment) ~  "WCS417",
+                      grepl("WCS315", df_ancom_DR$treatment) ~  "WCS315",
+                     grepl("CHA0", df_ancom_DR$treatment) ~  "CHA0" 
+                      ))
+
+df_ancom_DR <- df_ancom_DR[,2:9] #removes wrong treatment column
+
+#store in a list a singel dataframe per treatment
+
+df_ancom_DR_417 <- df_ancom_DR %>% filter(Treatment == "WCS417")
+df_ancom_DR_315 <- df_ancom_DR %>% filter(Treatment == "WCS315")
+df_ancom_DR_CHA0 <- df_ancom_DR %>% filter(Treatment == "CHA0")
+
+df_ancom_DR_root_l <- list(df_ancom_DR_417, df_ancom_DR_315, df_ancom_DR_CHA0)
+names(df_ancom_DR_root_l) <- c("WCS417", "WCS315", "CHA0")
+
+rm(df_ancom_DR_417, df_ancom_DR_315, df_ancom_DR_CHA0) 
+
+#place ASVs as rownames, for some reason didn't allow me to do it with lapply
+
+  df_ancom_DR_root_l$WCS417 <- df_ancom_DR_root_l$WCS417 %>% 
+              remove_rownames()%>%
+              column_to_rownames(var="ASV")
+
+  df_ancom_DR_root_l$WCS315 <- df_ancom_DR_root_l$WCS315 %>% 
+              remove_rownames()%>%
+              column_to_rownames(var="ASV")
+  
+    df_ancom_DR_root_l$CHA0 <- df_ancom_DR_root_l$CHA0 %>% 
+              remove_rownames()%>%
+              column_to_rownames(var="ASV")
+    
+  
+  #join df's from ANCOMBC and phyloseq
+    
+  df_ancom_DR_root_l$WCS417  <- cbind(as(df_ancom_DR_root_l$WCS417, "data.frame"),
+                  as(tax_table(ps_DR_root_f)[rownames(df_ancom_DR_root_l$WCS417), ], "matrix"))
+  
+  df_ancom_DR_root_l$WCS315  <- cbind(as(df_ancom_DR_root_l$WCS315, "data.frame"),
+                  as(tax_table(ps_DR_root_f)[rownames(df_ancom_DR_root_l$WCS315), ], "matrix"))
+  
+  df_ancom_DR_root_l$CHA0  <- cbind(as(df_ancom_DR_root_l$CHA0, "data.frame"),
+                  as(tax_table(ps_DR_root_f)[rownames(df_ancom_DR_root_l$CHA0), ], "matrix"))
+
+  
+  #keep only those with adjusted p value of <0.05 ("q_val") 
+
+  
+  df_ancom_DR_ps_sig_WCS417 <- df_ancom_DR_root_l$WCS417 %>% 
+   dplyr::filter(q_val < 0.05)%>%
+   mutate(test="3_ancombc") #695
+  
+    df_ancom_DR_ps_sig_WCS315 <- df_ancom_DR_root_l$WCS315 %>% 
+   dplyr::filter(q_val < 0.05)%>%
+   mutate(test="3_ancombc") #630
+    
+      df_ancom_DR_ps_sig_CHA0 <- df_ancom_DR_root_l$CHA0 %>% 
+   dplyr::filter(q_val < 0.05)%>%
+   mutate(test="3_ancombc") #386
+  
+df_ancom_DR_ps_sig_l <- list(df_ancom_DR_ps_sig_WCS417, df_ancom_DR_ps_sig_WCS315, df_ancom_DR_ps_sig_CHA0) #list of lists of significant ASVs detectec by ANCOM by each treatment
+
+names(df_ancom_DR_ps_sig_l) <- c("WCS417", "WCS315", "CHA0")
+
+
+#check how many DA asvs were
+
+sum(df_ancom_DR_root_l$WCS417$diff_abn == "TRUE") #695
+sum(df_ancom_DR_root_l$WCS315$diff_abn == "TRUE") #630
+sum(df_ancom_DR_root_l$CHA0$diff_abn == "TRUE") #386
+
+#Save test results and significan ASV list in a single object
+
+ancombc_DR_l <- list(results= df_ancom_DR_root_l, df_sig_asv_l = df_ancom_DR_ps_sig_l)
+
+#check which ones 
+#lapply(ancom_bc_l, function(x) rownames(x$df_sig_asv)) 
+
+#Save
+#save(ancom_bc_l, file="./results/r_objects/differential_abundance/1_ancombc_l.RData")
+#load(file="./results/r_objects/differential_abundance/1_ancombc_l.RData")
+
+#save list of ASVs per strains
+ancombc_DR_WCS417 <- ancombc_DR_l$df_sig_asv_l$WCS417
+write_xlsx(ancombc_DR_WCS417, "./5_Brassica_oleracea_exp/results/tables/diff_abundance/ancombc_DR_WCS417.xlsx")
+
+ancombc_DR_WCS315 <- ancombc_DR_l$df_sig_asv_l$WCS315
+write_xlsx(ancombc_DR_WCS315, "./5_Brassica_oleracea_exp/results/tables/diff_abundance/ancombc_DR_WCS315.xlsx")
+
+ancombc_DR_CHA0 <- ancombc_DR_l$df_sig_asv_l$CHA0
+write_xlsx(ancombc_DR_CHA0, "./5_Brassica_oleracea_exp/results/tables/diff_abundance/ancombc_DR_CHA0.xlsx")
+
+         
+```
+
+
+#Plotting number of ASVs enriched/depleated by 3 strains
+
+```{r}
+
+### well-watered ###
+  ancombc_WW_l
+
+WCS417_df <- ancombc_WW_l$df_sig_asv_l$WCS417 %>% 
+  rownames_to_column(var = "ASV")
+
+WCS315_df <- ancombc_WW_l$df_sig_asv_l$WCS315 %>% 
+  rownames_to_column(var = "ASV")
+
+CHA0_df <- ancombc_WW_l$df_sig_asv_l$CHA0 %>% 
+  rownames_to_column(var = "ASV")
+
+#join in a single dataframe
+df_combined <- rbind(WCS417_df, WCS315_df, CHA0_df)
+
+#Keep only log2fold of DA taxa (from all the treatments pull)
+
+DA_WCS417_vector <- WCS417_df$ASV #1045 ASVs
+DA_WCS315_vector <- WCS315_df$ASV #627 ASVs
+DA_CHA0_vector <- CHA0_df$ASV #629 ASVs
+
+#I want to keep only the ASVs  are differentially abundance under the three treatments when compared to control, so keep only ASVs that are present in the 3 vectors
+
+DA_all_treat_vector <- Reduce(intersect, list(DA_WCS417_vector,DA_WCS315_vector,DA_CHA0_vector)) #261 ASVs
+
+df_combined_WW_f <- df_combined %>%
+  filter(ASV %in% DA_all_treat_vector)
+
+#Now let's try to make a plot with both WW and DR data
+
+df_combined_DR_f
+df_combined_WW_f <- df_combined_f
+
+### drought ###
+
+    ancombc_DR_l
+
+WCS417_df <- ancombc_DR_l$df_sig_asv_l$WCS417 %>% 
+  rownames_to_column(var = "ASV")
+
+WCS315_df <- ancombc_DR_l$df_sig_asv_l$WCS315 %>% 
+  rownames_to_column(var = "ASV")
+
+CHA0_df <- ancombc_DR_l$df_sig_asv_l$CHA0 %>% 
+  rownames_to_column(var = "ASV")
+
+#join in a single dataframe
+df_combined_DR <- rbind(WCS417_df, WCS315_df, CHA0_df)
+
+# What if I select only the ASVs that are significant for the 3 treatments
+
+df_combined_DR
+
+#Keep only log2fold of DA taxa (from all the treatments pull)
+
+DA_WCS417_vector <- WCS417_df$ASV #695 ASVs
+DA_WCS315_vector <- WCS315_df$ASV #630 ASVs
+DA_CHA0_vector <- CHA0_df$ASV #386 ASVs
+
+#I want to keep only the ASVs  are differentially abundance under the three treatments when compared to control, so keep only ASVs that are present in the 3 vectors
+
+DA_all_treat_vector <- Reduce(intersect, list(DA_WCS417_vector,DA_WCS315_vector,DA_CHA0_vector)) #386 ASVs
+
+df_combined_DR_f <- df_combined_DR %>%
+  filter(ASV %in% DA_all_treat_vector)
+
+### Join well-watered and drought df ###
+
+#add a column for the water regime
+
+df_combined_DR_f <- df_combined_DR_f %>% mutate(water_regime = "DR")
+df_combined_WW_f <- df_combined_WW_f %>% mutate(water_regime = "WW")
+
+#join the df
+
+df_combined_f <- rbind(df_combined_DR_f, df_combined_WW_f)
+
+# Optional — remove prefixes like "p__", "f__", etc., for cleaner plot labels
+clean_taxonomy <- function(x) {
+  x <- trimws(x)  # Remove leading/trailing spaces
+  gsub("^\\w__", "", x)  # Remove the prefix
+}
+
+# Apply the function with mutate
+df_combined_f <- df_combined_f %>%
+  mutate(across(c(Phylum, Family, Genus), clean_taxonomy))
+
+
+#check how many ASVs are depleated/enriched per phylun for each treatment and water regime
+
+# Step 1: Add 'status' column to classify LFC direction
+df_summary <- df_combined_f %>%
+  mutate(status = ifelse(lfc > 0, "Enriched", "Depleted")) %>%
+  group_by(Phylum, Treatment, water_regime, status) %>%
+  summarise(n_ASVs = n_distinct(ASV), .groups = "drop") %>%
+  # Assign negative sign to depleted counts
+  mutate(n_ASVs = ifelse(status == "Depleted", -n_ASVs, n_ASVs))
+
+#plot
+
+df_summary$Treatment <- factor(df_summary$Treatment, c("WCS417", "WCS315", "CHA0"))
+
+df_summary$water_regime <- factor(df_summary$water_regime, c("WW", "DR"))
+
+df_summary$Phylum <- factor(df_summary$Phylum, c("Proteobacteria", "Planctomycetota", "Actinobacteriota","Bacteroidota", "Verrucomicrobiota","Acidobacteriota", "Chloroflexi", "Patescibacteria", "Gemmatimonadota", "Myxococcota", "Firmicutes", "Bdellovibrionota", "Armatimonadota", "Cyanobacteria", "Dependentiae","Abditibacteriota", "Nitrospirota", "WPS-2", "Hydrogenedentes", "NA"))
+
+
+ggplot(df_summary, aes(x = n_ASVs, y = Phylum, fill = Treatment)) +
+  geom_col(position = position_dodge(width = 0.95)) +
+  scale_fill_manual(values = c("#C9DC53", "#F99F58", "#9771A5")) +
+  facet_wrap(~water_regime) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(
+    x = "Number of ASVs (Enriched + / Depleted -)",
+    y = "Phylum",
+    fill = "Treatment"
+  ) +
+  theme_bw() + 
+  theme(axis.text.y = element_text(colour = "black", size = 12, face = "bold"))+
+  theme(axis.text.x = element_text(colour = "black", size = 12, angle = 0, hjust = 1, face = "plain"))
+
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./5_Brassica_oleracea_exp/results/plots/diff_abundance",
+  scale = 1.8,
+  width = 1800,
+  height = 1000,
+  units = "px",
+  dpi = 300),
+x=c("Fig.5c_n_ASVs.svg","Fig.5c_n_ASVs.png"))
+
+
+
+```
+
+#Plotting LFC of ASVs enriched/depleated at Phyllum level
+
+```{r}
+#now plot
+
+df_combined_f$Treatment <- factor(df_combined_f$Treatment, c("Control", "WCS417", "WCS315", "CHA0"))
+
+df_combined_f$water_regime <- factor(df_combined_f$water_regime, c("WW", "DR"))
+
+ggplot(df_combined_f,
+       aes(x = Family, y = lfc, fill = Treatment)) +
+   geom_point(aes(fill=Treatment), shape=21, color="black", stroke = 0.3,
+             size=3, alpha=0.7)+ # individual sample values
+  labs(y = "LFC", color = "Treatment") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  scale_fill_manual(values = c("#DC267F", "#FE6100", "#FFB000")) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", size=0.4)+
+  facet_grid(water_regime~Phylum, scales = "free_x", space = "free_x")+
+   theme_bw() + 
+  theme(axis.text.y = element_text(colour = "black", size = 8, face = "bold"))+
+  theme(axis.text.x = element_text(colour = "black", size = 8, angle = 90, hjust = 1, face = "plain"))
+
+
+#and if I order the phyllum based on more to less represented?
+
+unique(df_combined_f$Phylum) #20 phylums
+
+sum(df_combined_f$Phylum == "Proteobacteria", na.rm = TRUE) #555
+sum(df_combined_f$Phylum == "Bacteroidota", na.rm = TRUE) #114
+sum(df_combined_f$Phylum == "Patescibacteria", na.rm = TRUE) #51
+sum(df_combined_f$Phylum == "Acidobacteriota", na.rm = TRUE) #72
+sum(df_combined_f$Phylum == "Verrucomicrobiota", na.rm = TRUE) #114
+sum(df_combined_f$Phylum == "Myxococcota", na.rm = TRUE) #33
+sum(df_combined_f$Phylum == "Planctomycetota", na.rm = TRUE) #180
+sum(df_combined_f$Phylum == "Armatimonadota", na.rm = TRUE) #9
+sum(df_combined_f$Phylum == "WPS-2", na.rm = TRUE) #6
+sum(df_combined_f$Phylum == "Gemmatimonadota", na.rm = TRUE) #42
+sum(df_combined_f$Phylum == "Hydrogenedentes", na.rm = TRUE) #3
+sum(df_combined_f$Phylum == "Nitrospirota", na.rm = TRUE) #6
+sum(df_combined_f$Phylum == "Bdellovibrionota", na.rm = TRUE) #18
+sum(df_combined_f$Phylum == "Actinobacteriota", na.rm = TRUE) #129
+sum(df_combined_f$Phylum == "Chloroflexi", na.rm = TRUE) #60
+sum(df_combined_f$Phylum == "Dependentiae", na.rm = TRUE) #9
+sum(df_combined_f$Phylum == "NA", na.rm = TRUE) #0
+sum(df_combined_f$Phylum == "Cyanobacteria", na.rm = TRUE) #9
+sum(df_combined_f$Phylum == "Firmicutes", na.rm = TRUE) #21
+sum(df_combined_f$Phylum == "Abditibacteriota", na.rm = TRUE) #6
+
+#Plot againn
+df_combined_f$Treatment <- factor(df_combined_f$Treatment, c("WCS417", "WCS315", "CHA0"))
+
+df_combined_f$water_regime <- factor(df_combined_f$water_regime, c("WW", "DR"))
+
+df_combined_f$Phylum <- factor(df_combined_f$Phylum, c("Proteobacteria", "Planctomycetota", "Actinobacteriota","Bacteroidota", "Verrucomicrobiota","Acidobacteriota", "Chloroflexi", "Patescibacteria", "Gemmatimonadota", "Myxococcota", "Firmicutes", "Bdellovibrionota", "Armatimonadota", "Cyanobacteria", "Dependentiae","Abditibacteriota", "Nitrospirota", "WPS-2", "Hydrogenedentes", "NA"))
+
+ggplot(df_combined_f,
+       aes(x = Family, y = lfc, fill = Treatment)) +
+   geom_point(aes(fill=Treatment), shape=21, color="black", stroke = 0.3,
+             size=3, alpha=0.7)+ # individual sample values
+  labs(y = "LFC", color = "Treatment") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  scale_fill_manual(values = c("#C9DC53", "#F99F58", "#9771A5")) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", size=0.4)+
+  facet_grid(water_regime~Phylum, scales = "free_x", space = "free_x")+
+   theme_bw() + 
+  theme(axis.text.y = element_text(colour = "black", size = 8, face = "bold"))+
+  theme(axis.text.x = element_text(colour = "black", size = 8, angle = 90, hjust = 1, face = "plain"))
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./5_Brassica_oleracea_exp/results/plots/diff_abundance",
+  scale = 1.8,
+  width = 3500,
+  height = 1250,
+  units = "px",
+  dpi = 300),
+x=c("Fig.S6_LFC.svg","Fig.S6_LFC.png"))
+
+
+
+
+```
+
+
+
+##data for venn diagrams
+```{r}
+
+## WW ##
+
+#UP#
+WW_WCS417_up <- ancombc_WW_l$df_sig_asv_l$WCS417 %>% filter(lfc>0) %>%     rownames_to_column("ASV_WCS417")
+
+write.csv(WW_WCS417_up, "WW_WCS417_UP.csv", row.names = FALSE)
+
+WW_WCS315_up <- ancombc_WW_l$df_sig_asv_l$WCS315 %>% filter(lfc>0) %>%     rownames_to_column("ASV_WCS315")
+
+write.csv(WW_WCS315_up, "WW_WCS315_UP.csv", row.names = FALSE)
+
+WW_CHA0_up <- ancombc_WW_l$df_sig_asv_l$CHA0 %>% filter(lfc>0)  %>%     rownames_to_column("ASV_CHA0")
+
+write.csv(WW_CHA0_up, "WW_CHA0_UP.csv", row.names = FALSE)
+
+#DOWN#
+
+WW_WCS417_down <- ancombc_WW_l$df_sig_asv_l$WCS417 %>% filter(lfc<0) %>%     rownames_to_column("ASV_WCS417")
+
+write.csv(WW_WCS417_down, "WW_WCS417_DOWN.csv", row.names = FALSE)
+
+WW_WCS315_down <- ancombc_WW_l$df_sig_asv_l$WCS315 %>% filter(lfc<0) %>%     rownames_to_column("ASV_WCS315")
+
+write.csv(WW_WCS315_down, "WW_WCS315_DOWN.csv", row.names = FALSE)
+
+WW_CHA0_down <- ancombc_WW_l$df_sig_asv_l$CHA0 %>% filter(lfc<0) %>%     rownames_to_column("ASV_CHA0")
+
+write.csv(WW_CHA0_down, "WW_CHA0_DOWN.csv", row.names = FALSE)
+
+
+
+## DR ##
+
+#UP#
+DR_WCS417_up <- ancombc_DR_l$df_sig_asv_l$WCS417 %>% filter(lfc>0) %>%     rownames_to_column("ASV_WCS417")
+
+write.csv(DR_WCS417_up, "DR_WCS417_UP.csv", row.names = FALSE)
+
+DR_WCS315_up <- ancombc_DR_l$df_sig_asv_l$WCS315 %>% filter(lfc>0) %>%     rownames_to_column("ASV_WCS315")
+
+write.csv(DR_WCS315_up, "DR_WCS315_UP.csv", row.names = FALSE)
+
+DR_CHA0_up <- ancombc_DR_l$df_sig_asv_l$CHA0 %>% filter(lfc>0)  %>%     rownames_to_column("ASV_CHA0")
+
+write.csv(DR_CHA0_up, "DR_CHA0_UP.csv", row.names = FALSE)
+
+#DOWN#
+
+DR_WCS417_down <- ancombc_DR_l$df_sig_asv_l$WCS417 %>% filter(lfc<0) %>%     rownames_to_column("ASV_WCS417")
+
+write.csv(DR_WCS417_down, "DR_WCS417_DOWN.csv", row.names = FALSE)
+
+DR_WCS315_down <- ancombc_DR_l$df_sig_asv_l$WCS315 %>% filter(lfc<0) %>%     rownames_to_column("ASV_WCS315")
+
+write.csv(DR_WCS315_down, "DR_WCS315_DOWN.csv", row.names = FALSE)
+
+DR_CHA0_down <- ancombc_DR_l$df_sig_asv_l$CHA0 %>% filter(lfc<0) %>%     rownames_to_column("ASV_CHA0")
+
+write.csv(DR_CHA0_down, "DR_CHA0_DOWN.csv", row.names = FALSE)
+
+
+
+```
+
+

@@ -373,7 +373,6 @@ x=c("Fig.5a_NMDS.svg","Fig.5a_NMDS.png"))
 
 #Statistics
 
-
 ```{r}
 set.seed(303848)
 permanova <- adonis2(formula = phyloseq::distance(t(otu_table(ps_hard_filt_CSS)), method="bray") ~ treatment + water_regime,
