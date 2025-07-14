@@ -1,0 +1,27 @@
+[1] ‘1.22.0’
+[1] ‘1.52.0’
+[1] ‘1.0.9’
+[1] ‘1.2.0’
+[1] ‘4.7.0’
+[1] ‘3.3.6’
+[1] ‘4.10.0’
+[1] 94.69786
+       Sample  input filtered denoisedF denoisedR merged nonchim
+ZRB-10 ZRB-10 651560   563509    557350    555660 541020  505193
+ZRB-11 ZRB-11 643024   552511    546520    543877 529145  494871
+ZRB-12 ZRB-12 508894   441999    434642    433018 415104  393264
+ZRB-13 ZRB-13 718478   629916    623885    622392 607652  578150
+ZRB-14 ZRB-14 622489   529332    524158    523111 510984  486183
+ZRB-15 ZRB-15 491759   421115    415183    415880 401488  389197
+  filtered_pct_avg denoisedF_pct_avg denoisedR_pct_avg merged_pct_avg
+1         85.66029          98.61208          98.62232       96.33161
+  nonchim_pct_avg total_pct_avg
+1        94.81416      77.15621
+  filtered_pct_avg denoisedF_pct_avg denoisedR_pct_avg merged_pct_avg
+1         85.66029          98.61208          98.62232       96.33161
+  nonchim_pct_avg total_pct_avg
+1        94.81416      77.15621
+  filtered_pct_avg denoisedF_pct_avg denoisedR_pct_avg merged_pct_avg
+1         86.12048          98.65416          98.68014       96.52574
+  nonchim_pct_avg total_pct_avg
+1        95.07012      77.44875
