@@ -875,3 +875,177 @@ x=c("Fig.2B_mean_exp_SE_SWEET11.svg","Fig.2B_mean_exp_SE_SWEET11.png"))
 
 ```
 
+#8. Number of DEGs 
+```{r}
+# Let's make a barplot with the number of DEGs per condition
+padj_cutoff <- 0.05
+lfc_cutoff  <- 2
+
+#ww + tp1
+dds_tp1_ww
+res_WCS417_tp1_ww 
+res_WCS315_tp1_ww
+res_CHA0_tp1_ww 
+  # make a list
+res_tp1_ww <- list(
+  WCS417 = res_WCS417_tp1_ww, 
+  WCS315 = res_WCS315_tp1_ww, 
+  CHA0 = res_CHA0_tp1_ww)
+
+  #select significan genes and divide in up/down
+deg_counts_tp1_ww <- lapply(names(res_tp1_ww), function(cond) {
+  res <- res_tp1_ww[[cond]]
+  
+  data.frame(
+    strain = cond,
+    direction = c("Up", "Down"),
+    n = c(
+      sum(res$padj < padj_cutoff & res$log2FoldChange >  lfc_cutoff, na.rm = TRUE),
+      sum(res$padj < padj_cutoff & res$log2FoldChange < -lfc_cutoff, na.rm = TRUE)
+    )
+  )
+}) %>% bind_rows() 
+
+  #add info about water regime and timepoin
+deg_counts_tp1_ww <- deg_counts_tp1_ww %>% mutate(Water_regime = "well-watered",
+                                                  Timepoint = "24h")
+
+#dr + tp1
+dds_tp1_dr
+res_WCS417_tp1_dr 
+res_WCS315_tp1_dr
+res_CHA0_tp1_dr
+  # make a list
+res_tp1_dr <- list(
+  WCS417 = res_WCS417_tp1_dr, 
+  WCS315 = res_WCS315_tp1_dr, 
+  CHA0 = res_CHA0_tp1_dr)
+
+  #select significan genes and divide in up/down
+deg_counts_tp1_dr <- lapply(names(res_tp1_dr), function(cond) {
+  res <- res_tp1_dr[[cond]]
+  
+  data.frame(
+    strain = cond,
+    direction = c("Up", "Down"),
+    n = c(
+      sum(res$padj < padj_cutoff & res$log2FoldChange >  lfc_cutoff, na.rm = TRUE),
+      sum(res$padj < padj_cutoff & res$log2FoldChange < -lfc_cutoff, na.rm = TRUE)
+    )
+  )
+}) %>% bind_rows() 
+
+  #add info about water regime and timepoin
+deg_counts_tp1_dr <- deg_counts_tp1_dr %>% mutate(Water_regime = "drought",
+                                                  Timepoint = "24h")
+
+#ww + tp2
+dds_tp2_ww
+
+res_WCS417_tp1_ww 
+res_WCS315_tp1_ww
+res_CHA0_tp1_ww 
+  
+# make a list
+res_tp2_ww <- list(
+  WCS417 = res_WCS417_tp2_ww, 
+  WCS315 = res_WCS315_tp2_ww, 
+  CHA0 = res_CHA0_tp2_ww)
+
+  #select significan genes and divide in up/down
+deg_counts_tp2_ww <- lapply(names(res_tp2_ww), function(cond) {
+  res <- res_tp2_ww[[cond]]
+  
+  data.frame(
+    strain = cond,
+    direction = c("Up", "Down"),
+    n = c(
+      sum(res$padj < padj_cutoff & res$log2FoldChange >  lfc_cutoff, na.rm = TRUE),
+      sum(res$padj < padj_cutoff & res$log2FoldChange < -lfc_cutoff, na.rm = TRUE)
+    )
+  )
+}) %>% bind_rows() 
+
+  #add info about water regime and timepoin
+deg_counts_tp2_ww <- deg_counts_tp2_ww %>% mutate(Water_regime = "well-watered",
+                                                  Timepoint = "48h")
+#dr + tp2
+dds_tp2_dr
+
+res_WCS417_tp2_dr 
+res_WCS315_tp2_dr
+res_CHA0_tp2_dr
+  # make a list
+res_tp2_dr <- list(
+  WCS417 = res_WCS417_tp2_dr, 
+  WCS315 = res_WCS315_tp2_dr, 
+  CHA0 = res_CHA0_tp2_dr)
+
+  #select significant genes and divide in up/down
+deg_counts_tp2_dr <- lapply(names(res_tp2_dr), function(cond) {
+  res <- res_tp2_dr[[cond]]
+  
+  data.frame(
+    strain = cond,
+    direction = c("Up", "Down"),
+    n = c(
+      sum(res$padj < padj_cutoff & res$log2FoldChange >  lfc_cutoff, na.rm = TRUE),
+      sum(res$padj < padj_cutoff & res$log2FoldChange < -lfc_cutoff, na.rm = TRUE)
+    )
+  )
+}) %>% bind_rows() 
+
+  #add info about water regime and timepoint
+deg_counts_tp2_dr <- deg_counts_tp2_dr %>% mutate(Water_regime = "drought",
+                                                  Timepoint = "48h")
+
+# put all the conditions together
+deg_counts <- bind_rows(deg_counts_tp1_ww, deg_counts_tp1_dr, 
+                        deg_counts_tp2_ww, deg_counts_tp2_dr)
+
+
+
+#arrange order of factors
+deg_counts$strain <- factor(deg_counts$strain, levels=c("WCS417", "WCS315", "CHA0"))
+deg_counts$direction <- factor(deg_counts$direction, levels=c("Up", "Down"))
+deg_counts$Water_regime <- factor(deg_counts$Water_regime, levels=c("well-watered", "drought"))
+
+#plot
+ggplot(deg_counts, aes(x = strain, y = n, fill = direction)) +
+  geom_bar(
+    stat = "identity",
+    position = position_dodge(width = 0.7),
+    width = 0.6
+  ) +
+ facet_grid(Water_regime ~ Timepoint,
+             scales = "free_y",
+             space = "free_y") +
+  scale_fill_manual(
+    values = c("Up" = "#D55E00", "Down" = "#0072B2"),
+    labels = c("Upregulated", "Downregulated")
+  ) +
+  labs(
+    x = "Pseudomonas strain",
+    y = "Number of differentially expressed genes",
+    fill = NULL
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+mapply(function(x)
+  ggsave(
+    plot = last_plot(),
+    filename =x,
+    path = "./3_Arabidopsis_RNAseq_exp/results/plots",
+    scale = 1.8,
+    width = 150,
+    height = 100,
+    units = "mm",
+    dpi = 300),
+  x=c("Supp_FigX_DEGbarplot.svg","Supp_FigX_DEGbarplot.png"))
+```
+
