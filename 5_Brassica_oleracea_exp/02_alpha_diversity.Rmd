@@ -55,7 +55,7 @@ library(officer)
 ```{r}
 load("./5_Brassica_oleracea_exp/r_objects/ps_filtered.RData") 
 
-#We will only use the samples from the bulk soil
+#We will only use the samples from root associated
 
 ps_filtered_root <-  subset_samples(ps_filtered, Sample_type %in% "root_associated")
 ps_filtered_root <- prune_taxa(taxa_sums(ps_filtered_root) >0, ps_filtered_root)
