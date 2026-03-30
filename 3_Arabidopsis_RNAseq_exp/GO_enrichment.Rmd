@@ -1,0 +1,1482 @@
+---
+title: "GO_enrichment"
+author: "Zulema Carracedo Lorenzo"
+date: "2026-01-13"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Load needed packages
+
+```{r}
+library(DESeq2)
+library(ggplot2)
+library(apeglm)
+library(glmGamPoi)
+library(dplyr)
+library(org.At.tair.db) #for functional enrichment
+library(venneuler)
+library(ashr)
+library(biomaRt) #for GO terms
+library(tidyverse)
+library(clusterProfiler) #GO
+
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("clusterProfiler")
+
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("org.At.tair.db")
+
+#For heatmap:
+library(pheatmap)
+library(RColorBrewer)
+library(grid)
+
+#For saving tables in .xlxs
+library("writexl")
+```
+
+#WW+TP1
+```{r}
+#load deseq result for WW TP1
+load("./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp1_ww.Rdata")
+
+dds_tp1_ww
+
+dds_tp1_ww$Pseudomonas <- relevel(dds_tp1_ww$Pseudomonas, "control")
+
+
+#Filter low count genes
+dds_tp1_ww <- dds_tp1_ww[rowSums(counts(dds_tp1_ww)) > 10, ]
+
+#Run DeSeq analysis
+dds_tp1_ww <- DESeq(dds_tp1_ww)
+
+#Extract results
+resultsNames(dds_tp1_ww)
+# [1] "Intercept"                     "Pseudomonas_CHA0_vs_control"   "Pseudomonas_WCS315_vs_control" "Pseudomonas_WCS417_vs_control"
+
+# Extract LFC for each condition
+#Use lfcShrink() to stabilize LFC estimates:
+res_WCS417_tp1_ww <- lfcShrink(dds_tp1_ww, coef = "Pseudomonas_WCS417_vs_control", type = "ashr")
+res_WCS315_tp1_ww <- lfcShrink(dds_tp1_ww, coef = "Pseudomonas_WCS315_vs_control", type = "ashr")
+res_CHA0_tp1_ww <- lfcShrink(dds_tp1_ww, coef = "Pseudomonas_CHA0_vs_control", type = "ashr")
+
+#select only significant genes
+sig_WCS417_tp1_ww <- res_WCS417_tp1_ww[!is.na(res_WCS417_tp1_ww$padj) &
+                                         res_WCS417_tp1_ww$padj < 0.05 & 
+                                         abs(res_WCS417_tp1_ww$log2FoldChange) > 2, ]
+
+genes_up   <- rownames(sig_WCS417_tp1_ww[sig_WCS417_tp1_ww$log2FoldChange > 0, ])
+genes_down <- rownames(sig_WCS417_tp1_ww[sig_WCS417_tp1_ww$log2FoldChange < 0, ])
+
+#biological process
+ego_bp <- enrichGO(
+  gene          = genes_up,           # or genes_down
+  OrgDb         = org.At.tair.db,
+  keyType       = "TAIR",
+  ont           = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff  = 0.05,
+  qvalueCutoff  = 0.05,
+  readable      = TRUE
+)
+
+ego_mf <- enrichGO(gene=genes_up, OrgDb=org.At.tair.db, keyType="TAIR", ont="MF")
+ego_cc <- enrichGO(gene=genes_up, OrgDb=org.At.tair.db, keyType="TAIR", ont="CC")
+
+library(dplyr)
+
+bp_df <- as.data.frame(ego_bp) %>% mutate(Category = "Biological process")
+mf_df <- as.data.frame(ego_mf) %>% mutate(Category = "Molecular function")
+cc_df <- as.data.frame(ego_cc) %>% mutate(Category = "Cellular component")
+
+go_all <- bind_rows(bp_df, mf_df, cc_df)
+
+go_top <- go_all %>%
+  group_by(Category) %>%
+  arrange(p.adjust) %>%
+  slice_head(n = 10)
+
+go_top$logP <- -log10(go_top$p.adjust)
+
+library(ggplot2)
+
+ggplot(go_top, aes(x = logP, y = reorder(Description, logP), fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~Category, scales = "free_y") +
+  labs(
+    x = expression(-log[10]("adjusted P-value")),
+    y = "GO Term"
+  ) +
+  theme_bw() +
+  theme(
+    strip.text = element_text(face = "bold"),
+    axis.text.y = element_text(size = 9)
+  )
+
+
+```
+
+#DR+TP2
+```{r}
+#load deseq result for WW TP1
+load("./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp2_DR.Rdata")
+
+dds_tp2_dr
+
+dds_tp2_dr$Pseudomonas <- relevel(dds_tp2_dr$Pseudomonas, "control")
+
+
+#Filter low count genes
+dds_tp2_dr <- dds_tp2_dr[rowSums(counts(dds_tp2_dr)) > 10, ]
+
+#Run DeSeq analysis
+dds_tp2_dr <- DESeq(dds_tp2_dr)
+
+#Extract results
+resultsNames(dds_tp2_dr)
+# [1] "Intercept"                     "Pseudomonas_CHA0_vs_control"   "Pseudomonas_WCS315_vs_control" "Pseudomonas_WCS417_vs_control"
+
+# Extract LFC for each condition
+#Use lfcShrink() to stabilize LFC estimates:
+res_WCS417_tp2_dr <- lfcShrink(dds_tp2_dr, coef = "Pseudomonas_WCS417_vs_control", type = "ashr")
+
+
+#select only significant genes
+sig_WCS417_tp2_dr <- res_WCS417_tp2_dr[!is.na(res_WCS417_tp2_dr$padj) &
+                                         res_WCS417_tp2_dr$padj < 0.05 & 
+                                         abs(res_WCS417_tp2_dr$log2FoldChange) > 1, ]
+
+genes_up   <- rownames(sig_WCS417_tp2_dr[sig_WCS417_tp2_dr$log2FoldChange > 0, ])
+genes_down <- rownames(sig_WCS417_tp2_dr[sig_WCS417_tp2_dr$log2FoldChange < 0, ])
+
+#biological process
+ego_bp <- enrichGO(
+  gene          = genes_up,           # or genes_down
+  OrgDb         = org.At.tair.db,
+  keyType       = "TAIR",
+  ont           = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff  = 0.05,
+  qvalueCutoff  = 0.05,
+  readable      = TRUE
+)
+
+ego_mf <- enrichGO(gene=genes_up, OrgDb=org.At.tair.db, keyType="TAIR", ont="MF")
+ego_cc <- enrichGO(gene=genes_up, OrgDb=org.At.tair.db, keyType="TAIR", ont="CC")
+
+library(dplyr)
+
+bp_df <- as.data.frame(ego_bp) %>% mutate(Category = "Biological process")
+mf_df <- as.data.frame(ego_mf) %>% mutate(Category = "Molecular function")
+cc_df <- as.data.frame(ego_cc) %>% mutate(Category = "Cellular component")
+
+go_all <- bind_rows(bp_df, mf_df, cc_df)
+
+go_top <- go_all %>%
+  group_by(Category) %>%
+  arrange(p.adjust) %>%
+  slice_head(n = 10)
+
+go_top$logP <- -log10(go_top$p.adjust)
+
+library(ggplot2)
+
+ggplot(go_top, aes(x = logP, y = reorder(Description, logP), fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~Category, scales = "free_y") +
+  labs(
+    x = expression(-log[10]("adjusted P-value")),
+    y = "GO Term"
+  ) +
+  theme_bw() +
+  theme(
+    strip.text = element_text(face = "bold"),
+    axis.text.y = element_text(size = 9)
+  )
+
+
+```
+
+#combined 
+# tp2+dr
+```{r}
+#load deseq result for WW TP1
+load("./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp2_DR.Rdata") #deseq output
+
+#Extract results
+resultsNames(dds_tp2_dr)
+# [1] "Intercept"                     "Pseudomonas_CHA0_vs_control"   "Pseudomonas_WCS315_vs_control" "Pseudomonas_WCS417_vs_control"
+
+# Extract LFC for each condition
+#Use lfcShrink() to stabilize LFC estimates:
+res_WCS417_tp2_dr <- lfcShrink(dds_tp2_dr, coef = "Pseudomonas_WCS417_vs_control", type = "ashr")
+res_CHA0_tp2_dr <- lfcShrink(dds_tp2_dr, coef = "Pseudomonas_CHA0_vs_control", type = "ashr")
+
+#get significant genes per strain
+genes_WCS417 <- res_WCS417_tp2_dr[!is.na(res_WCS417_tp2_dr$padj) &
+                                         res_WCS417_tp2_dr$padj < 0.05 & 
+                                         abs(res_WCS417_tp2_dr$log2FoldChange) > 2, ]
+
+genes_up_WCS417   <- rownames(genes_WCS417[genes_WCS417$log2FoldChange > 0, ]) #55 genes
+genes_down_WCS417 <- rownames(genes_WCS417[genes_WCS417$log2FoldChange < 0, ]) #30 genes
+
+genes_CHA0 <- res_CHA0_tp2_dr[!is.na(res_CHA0_tp2_dr$padj) &
+                                         res_CHA0_tp2_dr$padj < 0.05 & 
+                                         abs(res_CHA0_tp2_dr$log2FoldChange) > 2, ]
+
+genes_up_CHA0 <- rownames(genes_CHA0[genes_CHA0$log2FoldChange > 0, ]) #43 genes
+genes_down_CHA0 <- rownames(genes_CHA0[genes_CHA0$log2FoldChange < 0, ]) #42 genes
+
+
+#GO enrichment per level
+ #BP -up
+BP_WCS417_up <- enrichGO(
+  gene = genes_up_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+BP_CHA0_up <- enrichGO(
+  gene = genes_up_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+ #BP - down
+BP_WCS417_down <- enrichGO(
+  gene = genes_down_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+BP_CHA0_down <- enrichGO(
+  gene = genes_down_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+#MF - up 
+
+MF_WCS417_up <- enrichGO(
+  gene = genes_up_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+MF_CHA0_up <- enrichGO(
+  gene = genes_up_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+#MF - down 
+
+MF_WCS417_down <- enrichGO(
+  gene = genes_down_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+MF_CHA0_down <- enrichGO(
+  gene = genes_down_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+
+#combined GO results
+
+BP_WCS417_up <- as.data.frame(BP_WCS417_up) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "up")
+BP_CHA0_up <- as.data.frame(BP_CHA0_up) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "up")
+
+BP_WCS417_down <- as.data.frame(BP_WCS417_down) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "down")
+BP_CHA0_down <- as.data.frame(BP_CHA0_down) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "down")
+
+MF_WCS417_up <- as.data.frame(MF_WCS417_up) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "up")
+MF_CHA0_up <- as.data.frame(MF_CHA0_up) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "up")
+
+MF_WCS417_down <- as.data.frame(MF_WCS417_down) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "down")
+MF_CHA0_down <- as.data.frame(MF_CHA0_down) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "down")
+
+
+go_combined_dr_tp2 <- bind_rows(BP_WCS417_up, BP_WCS417_down, 
+                                BP_CHA0_up, BP_CHA0_down, 
+                                MF_WCS417_down, MF_WCS417_up, 
+                                MF_CHA0_up, MF_CHA0_down)
+
+go_combined_dr_tp2$logP <- -log10(go_combined_dr_tp2$p.adjust)
+
+
+#select top GO terms per treatment
+go_top_dr_tp2 <- go_combined_dr_tp2 %>%
+  group_by(Treatment, Category) %>%
+  arrange(p.adjust) %>%
+  slice_head(n = 20)
+
+
+
+#adjust direction of log according to upregulation or downregulation
+go_plot <- go_top_dr_tp2 %>%
+  mutate(
+    Direction = ifelse(Regulation == "up", "Upregulated", "Downregulated"),
+    logP_signed = ifelse(Direction == "Downregulated", -logP, logP)
+  )
+
+#plot
+
+ggplot(go_plot,
+       aes(x = logP_signed,
+           y = Description,
+           fill = Direction)) +
+  geom_col() +
+  facet_grid(Category ~ Treatment, scales = "free_y", space = "free_y") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(
+    x = expression(paste("Enrichment (", -log[10], " adjusted P-value)")),
+    y = "GO term"
+  ) +
+  scale_fill_manual(values = c(
+    "Upregulated" = "#D73027",
+    "Downregulated" = "#4575B4"
+  )) +
+  theme_bw()
+
+
+
+
+
+ggplot(go_top, aes(x = logP, y = reorder(Description, logP), fill = Treatment)) +
+  geom_bar(stat = "identity") +
+  facet_grid(~Category) +
+  labs(
+    x = expression(-log[10]("adjusted P-value")),
+    y = "GO term"
+  ) +
+  theme_bw()
+
+
+
+library(dplyr)
+library(forcats)
+
+go_top <- go_top %>%
+  group_by(Category) %>%
+  mutate(Description_f = fct_reorder(Description, logP)) %>%
+  ungroup()
+
+ggplot(go_top,
+       aes(x = logP,
+           y = Description_f,
+           fill = Treatment)) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  facet_wrap(~Category, scales = "free_y") +
+  labs(
+    x = expression(-log[10]("adjusted P-value")),
+    y = "GO term"
+  ) +
+  theme_bw() +
+  theme(
+    strip.text = element_text(face = "bold"),
+    axis.text.y = element_text(size = 9)
+  )
+
+```
+
+# tp2+WW
+```{r}
+#load deseq result for WW TP1
+load("./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp2_WW.Rdata") #deseq output
+
+#Extract results
+resultsNames(dds_tp2_ww)
+# [1] "Intercept"                     "Pseudomonas_CHA0_vs_control"   "Pseudomonas_WCS315_vs_control" "Pseudomonas_WCS417_vs_control"
+
+# Extract LFC for each condition
+#Use lfcShrink() to stabilize LFC estimates:
+res_WCS417_tp2_ww <- lfcShrink(dds_tp2_ww, coef = "Pseudomonas_WCS417_vs_control", type = "ashr")
+res_CHA0_tp2_ww <- lfcShrink(dds_tp2_ww, coef = "Pseudomonas_CHA0_vs_control", type = "ashr")
+
+#get significant genes per strain
+genes_WCS417 <- rownames(res_WCS417_tp2_ww[!is.na(res_WCS417_tp2_ww$padj) &
+                                         res_WCS417_tp2_ww$padj < 0.05 & 
+                                         abs(res_WCS417_tp2_ww$log2FoldChange) > 2, ])
+
+genes_CHA0 <- rownames(res_CHA0_tp2_ww[!is.na(res_CHA0_tp2_ww$padj) &
+                                         res_CHA0_tp2_ww$padj < 0.05 & 
+                                         abs(res_CHA0_tp2_ww$log2FoldChange) > 2, ])
+
+
+#GO enrichment per level
+BP_WCS417 <- enrichGO(
+  gene = genes_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+BP_CHA0 <- enrichGO(
+  gene = genes_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+MF_WCS417 <- enrichGO(
+  gene = genes_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+MF_CHA0 <- enrichGO(
+  gene = genes_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+CC_WCS417 <- enrichGO(
+  gene = genes_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "CC",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+CC_CHA0 <- enrichGO(
+  gene = genes_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "CC",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+#combined GO results
+
+BP_WCS417 <- as.data.frame(BP_WCS417) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Biological process") 
+BP_CHA0 <- as.data.frame(BP_CHA0) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Biological process") 
+
+MF_WCS417 <- as.data.frame(MF_WCS417) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Molecular function")
+MF_CHA0 <- as.data.frame(MF_CHA0) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Molecular function")
+
+CC_WCS417 <- as.data.frame(CC_WCS417) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Cellular component")
+CC_CHA0 <- as.data.frame(CC_CHA0) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Cellular component")
+
+go_combined <- bind_rows(BP_WCS417, BP_CHA0, MF_WCS417, MF_CHA0, CC_WCS417, CC_CHA0)
+go_combined$logP <- -log10(go_combined$p.adjust)
+go_combined_ww_tp2 <- go_combined
+
+#select top GO terms per treatment
+go_top <- go_combined %>%
+  group_by(Treatment, Category) %>%
+  arrange(p.adjust) %>%
+  slice_head(n = 10)
+
+go_top_ww_tp2 <- go_top
+go_top <- go_top_ww_tp2
+#plot
+
+ggplot(go_top, aes(x = logP, y = reorder(Description, logP), fill = Treatment)) +
+  geom_bar(stat = "identity") +
+  facet_grid(~Category) +
+  labs(
+    x = expression(-log[10]("adjusted P-value")),
+    y = "GO term"
+  ) +
+  theme_bw()
+
+
+
+library(dplyr)
+library(forcats)
+
+go_top <- go_top %>%
+  group_by(Category) %>%
+  mutate(Description_f = fct_reorder(Description, logP)) %>%
+  ungroup()
+
+ggplot(go_top,
+       aes(x = logP,
+           y = Description_f,
+           fill = Treatment)) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  facet_wrap(~Category, scales = "free_y") +
+  labs(
+    x = expression(-log[10]("adjusted P-value")),
+    y = "GO term"
+  ) +
+  theme_bw() +
+  theme(
+    strip.text = element_text(face = "bold"),
+    axis.text.y = element_text(size = 9)
+  )
+
+```
+
+#combined WW and DR
+```{r}
+go_top_dr_tp2 <- go_top_dr_tp2 %>% mutate(Treatment2 = "DR")
+go_top_ww_tp2 <- go_top_ww_tp2 %>% mutate(Treatment2 = "WW")
+
+go_top_ww_dr_tp2 <- bind_rows(go_top_ww_tp2, go_top_dr_tp2)
+
+go_top_ww_dr_tp2 <- go_top_ww_dr_tp2 %>%
+  group_by(Treatment, Category, Treatment2) %>%
+  arrange(p.adjust) 
+
+go_top_ww_dr_tp2 <- go_top_ww_dr_tp2 %>%
+  group_by(Category) %>%
+  mutate(Description_f = fct_reorder(Description, logP)) %>%
+  ungroup()
+
+ggplot(go_top_ww_dr_tp2,
+       aes(x = logP,
+           y = Description_f,
+           fill = Treatment)) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  facet_grid(Category ~ Treatment2,
+             scales = "free_y",
+             space  = "free_y") +
+  labs(
+    x = expression(-log[10]("adjusted P-value")),
+    y = "GO term"
+  ) +
+  theme_bw() +
+  theme(
+    strip.text = element_text(face = "bold"),
+    axis.text.y = element_text(size = 9)
+    
+  )
+
+```
+
+
+# tp2+dr
+```{r}
+#load deseq result for WW TP1
+load("./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp2_DR.Rdata") #deseq output
+
+#Extract results
+resultsNames(dds_tp2_dr)
+# [1] "Intercept"                     "Pseudomonas_CHA0_vs_control"   "Pseudomonas_WCS315_vs_control" "Pseudomonas_WCS417_vs_control"
+
+# Extract LFC for each condition
+#Use lfcShrink() to stabilize LFC estimates:
+res_WCS417_tp2_dr <- lfcShrink(dds_tp2_dr, coef = "Pseudomonas_WCS417_vs_control", type = "ashr")
+res_CHA0_tp2_dr <- lfcShrink(dds_tp2_dr, coef = "Pseudomonas_CHA0_vs_control", type = "ashr")
+
+#get significant genes per strain
+genes_WCS417 <- res_WCS417_tp2_dr[!is.na(res_WCS417_tp2_dr$padj) &
+                                         res_WCS417_tp2_dr$padj < 0.05 & 
+                                         abs(res_WCS417_tp2_dr$log2FoldChange) > 2, ]
+
+genes_up_WCS417   <- rownames(genes_WCS417[genes_WCS417$log2FoldChange > 0, ]) #55 genes
+genes_down_WCS417 <- rownames(genes_WCS417[genes_WCS417$log2FoldChange < 0, ]) #30 genes
+
+genes_CHA0 <- res_CHA0_tp2_dr[!is.na(res_CHA0_tp2_dr$padj) &
+                                         res_CHA0_tp2_dr$padj < 0.05 & 
+                                         abs(res_CHA0_tp2_dr$log2FoldChange) > 2, ]
+
+genes_up_CHA0 <- rownames(genes_CHA0[genes_CHA0$log2FoldChange > 0, ]) #43 genes
+genes_down_CHA0 <- rownames(genes_CHA0[genes_CHA0$log2FoldChange < 0, ]) #42 genes
+
+
+#GO enrichment per level
+ #BP -up
+BP_WCS417_up <- enrichGO(
+  gene = genes_up_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+BP_CHA0_up <- enrichGO(
+  gene = genes_up_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+ #BP - down
+BP_WCS417_down <- enrichGO(
+  gene = genes_down_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+BP_CHA0_down <- enrichGO(
+  gene = genes_down_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+#MF - up 
+
+MF_WCS417_up <- enrichGO(
+  gene = genes_up_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+MF_CHA0_up <- enrichGO(
+  gene = genes_up_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+#MF - down 
+
+MF_WCS417_down <- enrichGO(
+  gene = genes_down_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+MF_CHA0_down <- enrichGO(
+  gene = genes_down_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+
+#combined GO results
+
+BP_WCS417_up <- as.data.frame(BP_WCS417_up) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "up")
+BP_CHA0_up <- as.data.frame(BP_CHA0_up) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "up")
+
+BP_WCS417_down <- as.data.frame(BP_WCS417_down) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "down")
+BP_CHA0_down <- as.data.frame(BP_CHA0_down) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "down")
+
+MF_WCS417_up <- as.data.frame(MF_WCS417_up) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "up")
+MF_CHA0_up <- as.data.frame(MF_CHA0_up) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "up")
+
+MF_WCS417_down <- as.data.frame(MF_WCS417_down) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "down")
+MF_CHA0_down <- as.data.frame(MF_CHA0_down) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "down")
+
+
+go_combined_dr_tp2 <- bind_rows(BP_WCS417_up, BP_WCS417_down, 
+                                BP_CHA0_up, BP_CHA0_down, 
+                                MF_WCS417_down, MF_WCS417_up, 
+                                MF_CHA0_up, MF_CHA0_down)
+
+go_combined_dr_tp2$logP <- -log10(go_combined_dr_tp2$p.adjust)
+
+
+
+```
+
+# tp2+ww
+```{r}
+
+#load deseq result for WW TP1
+load("./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp2_WW.Rdata") #deseq output
+
+#Extract results
+resultsNames(dds_tp2_ww)
+# [1] "Intercept"                     "Pseudomonas_CHA0_vs_control"   "Pseudomonas_WCS315_vs_control" "Pseudomonas_WCS417_vs_control"
+
+# Extract LFC for each condition
+#Use lfcShrink() to stabilize LFC estimates:
+res_WCS417_tp2_ww <- lfcShrink(dds_tp2_ww, coef = "Pseudomonas_WCS417_vs_control", type = "ashr")
+res_CHA0_tp2_ww <- lfcShrink(dds_tp2_ww, coef = "Pseudomonas_CHA0_vs_control", type = "ashr")
+
+#get significant genes per strain
+genes_WCS417 <- res_WCS417_tp2_ww[!is.na(res_WCS417_tp2_ww$padj) &
+                                         res_WCS417_tp2_ww$padj < 0.05 & 
+                                         abs(res_WCS417_tp2_ww$log2FoldChange) > 2, ]
+
+genes_up_WCS417   <- rownames(genes_WCS417[genes_WCS417$log2FoldChange > 0, ]) #4 genes
+genes_down_WCS417 <- rownames(genes_WCS417[genes_WCS417$log2FoldChange < 0, ]) #7 genes
+
+genes_CHA0 <- res_CHA0_tp2_ww[!is.na(res_CHA0_tp2_ww$padj) &
+                                         res_CHA0_tp2_ww$padj < 0.05 & 
+                                         abs(res_CHA0_tp2_ww$log2FoldChange) > 2, ]
+
+genes_up_CHA0 <- rownames(genes_CHA0[genes_CHA0$log2FoldChange > 0, ]) #9 genes
+genes_down_CHA0 <- rownames(genes_CHA0[genes_CHA0$log2FoldChange < 0, ]) #37 genes
+
+
+#GO enrichment per level
+ #BP -up
+BP_WCS417_up <- enrichGO(
+  gene = genes_up_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+BP_CHA0_up <- enrichGO(
+  gene = genes_up_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+ #BP - down
+BP_WCS417_down <- enrichGO(
+  gene = genes_down_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+BP_CHA0_down <- enrichGO(
+  gene = genes_down_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+#MF - up 
+
+MF_WCS417_up <- enrichGO(
+  gene = genes_up_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+MF_CHA0_up <- enrichGO(
+  gene = genes_up_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+#MF - down 
+
+MF_WCS417_down <- enrichGO(
+  gene = genes_down_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+MF_CHA0_down <- enrichGO(
+  gene = genes_down_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+
+#combined GO results
+
+BP_WCS417_up <- as.data.frame(BP_WCS417_up) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "up")
+BP_CHA0_up <- as.data.frame(BP_CHA0_up) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "up")
+
+BP_WCS417_down <- as.data.frame(BP_WCS417_down) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "down")
+BP_CHA0_down <- as.data.frame(BP_CHA0_down) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "down")
+
+MF_WCS417_up <- as.data.frame(MF_WCS417_up) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "up")
+MF_CHA0_up <- as.data.frame(MF_CHA0_up) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "up")
+
+MF_WCS417_down <- as.data.frame(MF_WCS417_down) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "down")
+MF_CHA0_down <- as.data.frame(MF_CHA0_down) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "down")
+
+
+go_combined_ww_tp2 <- bind_rows(BP_WCS417_up, BP_WCS417_down, 
+                                BP_CHA0_up, BP_CHA0_down, 
+                                MF_WCS417_down, MF_WCS417_up, 
+                                MF_CHA0_up, MF_CHA0_down)
+
+go_combined_ww_tp2$logP <- -log10(go_combined_ww_tp2$p.adjust)
+
+
+
+```
+#combined mirror plot tp2 
+```{r}
+go_combined_dr_tp2 <- go_combined_dr_tp2 %>% mutate(Water_regime = "drought")
+go_combined_ww_tp2 <- go_combined_ww_tp2 %>% mutate(Water_regime = "well-watered")
+
+#combined both datasets
+
+go_combined_tp2 <- bind_rows(go_combined_dr_tp2, go_combined_ww_tp2)
+  
+#select top GO terms per treatment
+go_top_tp2 <- go_combined_tp2 %>%
+  group_by(Treatment, Category, Water_regime) %>%
+  arrange(p.adjust) %>%
+  slice_head(n = 50)
+
+#adjust direction of log according to upregulation or downregulation
+go_plot <- go_top_tp2 %>%
+  mutate(
+    Direction = ifelse(Regulation == "up", "Upregulated", "Downregulated"),
+    logP_signed = ifelse(Direction == "Downregulated", -logP, logP)
+  )
+
+#plot
+
+ggplot(go_plot,
+       aes(x = logP_signed,
+           y = Description,
+           fill = Treatment)) +
+  geom_col() +
+  facet_grid(Category ~ Water_regime, scales = "free_y", space = "free_y") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(
+    x = expression(paste("Enrichment (", -log[10], " adjusted P-value)")),
+    y = "GO term"
+  ) +
+  scale_fill_manual(values = c(
+    "Upregulated" = "#D73027",
+    "Downregulated" = "#4575B4"
+  )) +
+  theme_bw()
+
+
+#let's make a combined column for treatment x water regime 
+go_plot <- go_plot %>%
+  mutate(Combined = paste(Treatment, Water_regime, sep = "_"))
+
+#adjust order GO
+go_plot <- go_plot %>%
+  group_by(Category) %>%
+  mutate(Description_f = fct_reorder(Description, logP_signed)) %>%
+  ungroup()
+
+#repite plot 
+
+
+ggplot(go_plot,
+       aes(x = logP_signed,
+           y = Description_f,
+           fill = Combined)) +
+  geom_col() +
+  facet_grid(Category ~ ., scales = "free_y", space = "free_y") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(
+    x = expression(paste("Enrichment (", -log[10], " adjusted P-value)")),
+    y = "GO term"
+  ) +
+  theme_bw()
+```
+
+# tp1+dr
+```{r}
+#load deseq result for WW TP1
+load("./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp1_DR.Rdata") #deseq output
+
+#Extract results
+resultsNames(dds_tp1_dr)
+# [1] "Intercept"                     "Pseudomonas_CHA0_vs_control"   "Pseudomonas_WCS315_vs_control" "Pseudomonas_WCS417_vs_control"
+
+# Extract LFC for each condition
+#Use lfcShrink() to stabilize LFC estimates:
+res_WCS417_tp1_dr <- lfcShrink(dds_tp1_dr, coef = "Pseudomonas_WCS417_vs_control", type = "ashr")
+res_CHA0_tp1_dr <- lfcShrink(dds_tp1_dr, coef = "Pseudomonas_CHA0_vs_control", type = "ashr")
+
+#get significant genes per strain
+genes_WCS417 <- res_WCS417_tp1_dr[!is.na(res_WCS417_tp1_dr$padj) &
+                                         res_WCS417_tp1_dr$padj < 0.05 & 
+                                         abs(res_WCS417_tp1_dr$log2FoldChange) > 2, ]
+
+genes_up_WCS417   <- rownames(genes_WCS417[genes_WCS417$log2FoldChange > 0, ]) #7 genes
+genes_down_WCS417 <- rownames(genes_WCS417[genes_WCS417$log2FoldChange < 0, ]) #6 genes
+
+genes_CHA0 <- res_CHA0_tp1_dr[!is.na(res_CHA0_tp1_dr$padj) &
+                                         res_CHA0_tp1_dr$padj < 0.05 & 
+                                         abs(res_CHA0_tp1_dr$log2FoldChange) > 2, ]
+
+genes_up_CHA0 <- rownames(genes_CHA0[genes_CHA0$log2FoldChange > 0, ]) #5 genes
+genes_down_CHA0 <- rownames(genes_CHA0[genes_CHA0$log2FoldChange < 0, ]) #1 genes
+
+
+#GO enrichment per level
+ #BP -up
+BP_WCS417_up <- enrichGO(
+  gene = genes_up_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+BP_CHA0_up <- enrichGO(
+  gene = genes_up_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+ #BP - down
+BP_WCS417_down <- enrichGO(
+  gene = genes_down_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+BP_CHA0_down <- enrichGO(
+  gene = genes_down_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+#MF - up 
+
+MF_WCS417_up <- enrichGO(
+  gene = genes_up_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+MF_CHA0_up <- enrichGO(
+  gene = genes_up_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+#MF - down 
+
+MF_WCS417_down <- enrichGO(
+  gene = genes_down_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+MF_CHA0_down <- enrichGO(
+  gene = genes_down_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+
+#combined GO results
+
+BP_WCS417_up <- as.data.frame(BP_WCS417_up) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "up")
+BP_CHA0_up <- as.data.frame(BP_CHA0_up) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "up")
+
+BP_WCS417_down <- as.data.frame(BP_WCS417_down) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "down")
+BP_CHA0_down <- as.data.frame(BP_CHA0_down) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "down")
+
+MF_WCS417_up <- as.data.frame(MF_WCS417_up) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "up")
+MF_CHA0_up <- as.data.frame(MF_CHA0_up) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "up")
+
+MF_WCS417_down <- as.data.frame(MF_WCS417_down) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "down")
+MF_CHA0_down <- as.data.frame(MF_CHA0_down) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "down")
+
+
+go_combined_dr_tp1 <- bind_rows(BP_WCS417_up, BP_WCS417_down, 
+                                BP_CHA0_up, BP_CHA0_down, 
+                                MF_WCS417_down, MF_WCS417_up, 
+                                MF_CHA0_up, MF_CHA0_down)
+
+go_combined_dr_tp1$logP <- -log10(go_combined_dr_tp1$p.adjust)
+
+
+
+```
+
+# tp1+ww
+```{r}
+
+#load deseq result for WW TP1
+load("./3_Arabidopsis_RNAseq_exp/r_objects/dds_tp1_WW.Rdata") #deseq output
+
+#Extract results
+resultsNames(dds_tp1_ww)
+# [1] "Intercept"                     "Pseudomonas_CHA0_vs_control"   "Pseudomonas_WCS315_vs_control" "Pseudomonas_WCS417_vs_control"
+
+# Extract LFC for each condition
+#Use lfcShrink() to stabilize LFC estimates:
+res_WCS417_tp1_ww <- lfcShrink(dds_tp1_ww, coef = "Pseudomonas_WCS417_vs_control", type = "ashr")
+res_CHA0_tp1_ww <- lfcShrink(dds_tp1_ww, coef = "Pseudomonas_CHA0_vs_control", type = "ashr")
+
+#get significant genes per strain
+genes_WCS417 <- res_WCS417_tp1_ww[!is.na(res_WCS417_tp1_ww$padj) &
+                                         res_WCS417_tp1_ww$padj < 0.05 & 
+                                         abs(res_WCS417_tp1_ww$log2FoldChange) > 2, ]
+
+genes_up_WCS417   <- rownames(genes_WCS417[genes_WCS417$log2FoldChange > 0, ]) #25 genes
+genes_down_WCS417 <- rownames(genes_WCS417[genes_WCS417$log2FoldChange < 0, ]) #23 genes
+
+genes_CHA0 <- res_CHA0_tp1_ww[!is.na(res_CHA0_tp1_ww$padj) &
+                                         res_CHA0_tp1_ww$padj < 0.05 & 
+                                         abs(res_CHA0_tp1_ww$log2FoldChange) > 2, ]
+
+genes_up_CHA0 <- rownames(genes_CHA0[genes_CHA0$log2FoldChange > 0, ]) #24 genes
+genes_down_CHA0 <- rownames(genes_CHA0[genes_CHA0$log2FoldChange < 0, ]) #77 genes
+
+
+#GO enrichment per level
+ #BP -up
+BP_WCS417_up <- enrichGO(
+  gene = genes_up_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+BP_CHA0_up <- enrichGO(
+  gene = genes_up_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+ #BP - down
+BP_WCS417_down <- enrichGO(
+  gene = genes_down_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+BP_CHA0_down <- enrichGO(
+  gene = genes_down_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+#MF - up 
+
+MF_WCS417_up <- enrichGO(
+  gene = genes_up_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+MF_CHA0_up <- enrichGO(
+  gene = genes_up_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+#MF - down 
+
+MF_WCS417_down <- enrichGO(
+  gene = genes_down_WCS417,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+MF_CHA0_down <- enrichGO(
+  gene = genes_down_CHA0,
+  OrgDb = org.At.tair.db,
+  keyType = "TAIR",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  readable = TRUE
+)
+
+
+#combined GO results
+
+BP_WCS417_up <- as.data.frame(BP_WCS417_up) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "up")
+BP_CHA0_up <- as.data.frame(BP_CHA0_up) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "up")
+
+BP_WCS417_down <- as.data.frame(BP_WCS417_down) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "down")
+BP_CHA0_down <- as.data.frame(BP_CHA0_down) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Biological process") %>% mutate(Regulation = "down")
+
+MF_WCS417_up <- as.data.frame(MF_WCS417_up) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "up")
+MF_CHA0_up <- as.data.frame(MF_CHA0_up) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "up")
+
+MF_WCS417_down <- as.data.frame(MF_WCS417_down) %>% mutate(Treatment = "PsWCS417") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "down")
+MF_CHA0_down <- as.data.frame(MF_CHA0_down) %>% mutate(Treatment = "PsCHA0") %>% mutate(Category = "Molecular function") %>% mutate(Regulation = "down")
+
+
+go_combined_ww_tp1 <- bind_rows(BP_WCS417_up, BP_WCS417_down, 
+                                BP_CHA0_up, BP_CHA0_down, 
+                                MF_WCS417_down, MF_WCS417_up, 
+                                MF_CHA0_up, MF_CHA0_down)
+
+go_combined_ww_tp1$logP <- -log10(go_combined_ww_tp1$p.adjust)
+
+
+
+```
+#combined mirror plot tp1 and tp2 
+```{r}
+go_combined_dr_tp2 <- go_combined_dr_tp2 %>% mutate(Water_regime = "drought")
+go_combined_ww_tp2 <- go_combined_ww_tp2 %>% mutate(Water_regime = "well-watered")
+go_combined_dr_tp1 <- go_combined_dr_tp1 %>% mutate(Water_regime = "drought")
+go_combined_ww_tp1 <- go_combined_ww_tp1 %>% mutate(Water_regime = "well-watered")
+
+go_combined_dr_tp2 <- go_combined_dr_tp2 %>% mutate(Timepoint = "48h")
+go_combined_ww_tp2 <- go_combined_ww_tp2 %>% mutate(Timepoint = "48h")
+go_combined_dr_tp1 <- go_combined_dr_tp1 %>% mutate(Timepoint = "24h")
+go_combined_ww_tp1 <- go_combined_ww_tp1 %>% mutate(Timepoint = "24h")
+
+#combined both datasets
+
+go_combined_all <- bind_rows(go_combined_dr_tp2, go_combined_ww_tp2, go_combined_dr_tp1, go_combined_ww_tp1)
+  
+#select top GO terms per treatment
+go_top_all <- go_combined_all %>%
+  group_by(Treatment, Category, Water_regime, Timepoint) %>%
+  arrange(p.adjust) %>%
+  slice_head(n = 10)
+
+#adjust direction of log according to upregulation or downregulation
+go_plot_all <- go_top_all %>%
+  mutate(
+    Direction = ifelse(Regulation == "up", "Upregulated", "Downregulated"),
+    logP_signed = ifelse(Direction == "Downregulated", -logP, logP)
+  )
+
+#let's make a combined column for treatment x water regime 
+go_plot_all <- go_plot_all %>%
+  mutate(Combined = paste(Treatment, Water_regime, sep = "_"))
+
+#let's make a combined column for treatment x water regime 
+go_plot_all <- go_plot_all %>%
+  mutate(Combined = paste(Treatment, Water_regime, sep = "_"))
+
+#adjust order GO
+go_plot_all <- go_plot_all %>%
+  group_by(Category) %>%
+  mutate(Description_f = fct_reorder(Description, logP_signed)) %>%
+  ungroup()
+
+#repite plot 
+
+
+ggplot(go_plot_all,
+       aes(x = logP_signed,
+           y = Description_f,
+           fill = Combined)) +
+  geom_col() +
+  facet_grid(Category ~ Timepoint, scales = "free_y", space = "free_y") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(
+    x = expression(paste("Enrichment (", -log[10], " adjusted P-value)")),
+    y = "GO term"
+  ) +
+  theme_bw()
+
+#avoid bar stacking 
+ggplot(go_plot_all,
+       aes(x = logP_signed,
+           y = Description_f,
+           fill = Combined)) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  facet_grid(Category ~ Timepoint,
+             scales = "free_y",
+             space = "free_y") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(
+    x = expression(paste("Enrichment (", -log[10], " adjusted P-value)")),
+    y = "GO term"
+  ) +
+  theme_bw()
+
+#order treatments
+go_plot_all$Combined <- factor(go_plot_all$Combined, levels = c("PsWCS417_well-watered", "PsCHA0_well-watered", "PsWCS417_drought", "PsCHA0_drought"))
+
+go_all_10 <- ggplot(go_plot_all,
+       aes(x = logP_signed,
+           y = Description_f,
+           fill = Combined)) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  facet_grid(Category ~ Timepoint,
+             scales = "free_y",
+             space = "free_y") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(
+   x = expression(paste("GO significance (signed ", -log[10], " adjusted P-value)")),
+    y = "GO term"
+  ) +
+  theme_bw(8)
+
+mapply(function(x)
+  ggsave(
+    plot = last_plot(),
+    filename =x,
+    path = "./3_Arabidopsis_RNAseq_exp/results/plots",
+    scale = 1.8,
+    width = 150,
+    height = 100,
+    units = "mm",
+    dpi = 300),
+  x=c("Supp_FigX_GOall10.svg","Supp_FigX_GOall10.png"))
+
+#using gene count
+go_all_count <- ggplot(go_plot_all,
+       aes(x = Count,
+           y = Description_f,
+           fill = Combined)) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  facet_grid(Category ~ Timepoint,
+             scales = "free_y",
+             space = "free_y") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(
+   x = expression(paste("GO significance (signed ", -log[10], " adjusted P-value)")),
+    y = "GO term"
+  ) +
+  theme_bw(8)
+
+#modify GO count to have upregulated genes as positive and downregulated genes as negative
+go_plot_all <- go_plot_all %>%
+  mutate(
+    Count_signed = ifelse(Regulation == "down", -Count, Count),
+    logP = -log10(p.adjust)
+  )
+
+#plot
+ggplot(go_plot_all,
+       aes(x = Count_signed,
+           y = Description_f,
+           fill = Combined,
+           alpha = logP)) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  facet_grid(Category ~ Timepoint, scales = "free_y", space = "free_y") +
+  scale_alpha_continuous(
+    range = c(0.4, 1),
+    name = expression(-log[10]("adj P"))
+  ) +
+  labs(
+    x = "Number of DE genes (Up ↑ / Down ↓)",
+    y = "GO term",
+    fill = "Treatment"
+  ) +
+  theme_bw()
+
+#and if I plot gene ratio instead?
+library(tidyr)
+
+go_plot_all <- go_plot_all %>%
+  separate(GeneRatio, into = c("k", "n"), sep = "/", convert = TRUE) %>%
+  mutate(GeneRatio_num = k / n) #converts ratio to numeric
+
+go_plot_all <- go_plot_all %>%
+  mutate(
+    GeneRatio_signed = ifelse(Regulation == "down",
+                              -GeneRatio_num,
+                               GeneRatio_num),
+    logP = -log10(p.adjust)
+  )#signes ratio
+
+
+ggplot(go_plot_all,
+       aes(x = GeneRatio_signed,
+           y = Description_f,
+           fill = Combined,
+           alpha = logP)) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  facet_grid(Category ~ Timepoint, scales = "free_y", space = "free_y") +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_alpha_continuous(
+    range = c(0.4, 1),
+    name = expression(-log[10]("FDR"))
+  ) +
+  labs(
+    x = "Fraction of DE genes (Up ↑ / Down ↓)",
+    y = "GO term",
+    fill = "Treatment"
+  ) +
+  theme_bw()
+
+
+
+```
+#using only the conditions where more than 10 genes were up/down-regulated
+```{r}
+go_combined_dr_tp2 #keep all conditions
+
+go_combined_ww_tp2 #keep only down CHA0
+go_combined_ww_tp2_clean <- go_combined_ww_tp2 %>%
+  filter(
+    Treatment == "PsCHA0",
+    Regulation == "down"
+  )
+ 
+go_combined_dr_tp1 #none of the condition has >10
+go_combined_ww_tp1 #keep all
+
+#combined both datasets
+
+go_combined_all_clean <- bind_rows(go_combined_dr_tp2, go_combined_ww_tp2_clean, go_combined_ww_tp1)
+  
+#select top GO terms per treatment
+go_top_all_clean <- go_combined_all_clean %>%
+  group_by(Treatment, Category, Water_regime, Timepoint) %>%
+  arrange(p.adjust) %>%
+  slice_head(n = 10)
+
+#adjust direction of log according to upregulation or downregulation
+go_plot_all_clean <- go_top_all_clean %>%
+  mutate(
+    Direction = ifelse(Regulation == "up", "Upregulated", "Downregulated"),
+    logP_signed = ifelse(Direction == "Downregulated", -logP, logP)
+  )
+
+#let's make a combined column for treatment x water regime 
+go_plot_all_clean <- go_plot_all_clean %>%
+  mutate(Combined = paste(Treatment, Water_regime, sep = "_"))
+
+#let's make a combined column for treatment x water regime 
+go_plot_all_clean <- go_plot_all_clean %>%
+  mutate(Combined = paste(Treatment, Water_regime, sep = "_"))
+
+#adjust order GO
+go_plot_all_clean <- go_plot_all_clean %>%
+  group_by(Category) %>%
+  mutate(Description_f = fct_reorder(Description, logP_signed)) %>%
+  ungroup()
+
+
+#order treatments
+go_plot_all_clean$Combined <- factor(go_plot_all_clean$Combined, levels = c("PsWCS417_well-watered", "PsCHA0_well-watered", "PsWCS417_drought", "PsCHA0_drought"))
+
+go_all_10_clean <- ggplot(go_plot_all_clean,
+       aes(x = logP_signed,
+           y = Description_f,
+           fill = Combined)) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  facet_grid(Category ~ Timepoint,
+             scales = "free_y",
+             space = "free_y") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(
+   x = expression(paste("GO significance (signed ", -log[10], " adjusted P-value)")),
+    y = "GO term"
+  ) +
+  theme_bw(10)+
+  theme(
+    text = element_text(color = "black"),
+    strip.text = element_text(face = "bold"),
+    axis.text.y = element_text(size = 10)
+  )
+
+mapply(function(x)
+  ggsave(
+    plot = last_plot(),
+    filename =x,
+    path = "./3_Arabidopsis_RNAseq_exp/results/plots",
+    scale = 1.8,
+    width = 240,
+    height = 130,
+    units = "mm",
+    dpi = 300),
+  x=c("Supp_FigX_GOall10_clean.svg","Supp_FigX_GOall10_clean.png"))
+
+
+```
+
