@@ -146,7 +146,7 @@ min(sums) #259,522
 max(sums) #770,824
 
 # Sample with lowest counts:
-names(sums[order(sums)][1]) #it's a sample of bulk soil (ZSB-51)
+names(sums[order(sums)][1]) #it's a sample of root associated (ZSB-51)
 
 #see the correlation between number of reads and diversity of ASVs
 t_otu <- t(otu_table(ps)) #transpose observations to rows, needed for vegan package
@@ -281,7 +281,7 @@ p_Chloro <- plot_bar(subset_taxa(ps_Bac, Order==" o__Chloroplast"), fill="Specie
 p_Chloro + facet_wrap(~Sample_type, nrow=1, scales="free_x") +
   ggtitle("Chloroplast contamination") 
 
-#sample ZSB-51 has much higher chloroplast contamination than other samples. This is very surprisin as it is a bulk soil samples
+#sample ZSB-51 has much higher chloroplast contamination than other samples. This is very surprisin as it is a root associated samples
 
 ggsave("Bac.Chloroplast-contam.png", path = "./5_Brassica_oleracea_exp/results/plots/exploration",
          width = 40, height = 20 , units = "in", dpi=300, scale=0.5)
