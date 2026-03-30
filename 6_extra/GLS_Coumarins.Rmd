@@ -1,0 +1,813 @@
+---
+title: "GLS_Coumarins"
+author: "Zulema Carracedo Lorenzo"
+date: "2026-01-22"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+#data management
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(stringr)
+library(readxl)
+library(flextable)
+
+#statistics
+library(multcompView)
+library(vegan)
+library(pairwiseAdonis)
+library(emmeans)
+library(DHARMa) #for simmulate residuals
+library(glmmTMB) #for glmm
+library(car)
+
+#plots
+library(ggplot2)
+library(ggpattern)
+library(rempsyc) #for tables
+library(fitdistrplus)
+
+# packages needed for Cohen's D
+library(effsize)  
+library(effectsize)
+library(lsr)
+
+#for tables
+library(flextable)
+library(officer)
+library(car)
+library(emmeans)
+library(multcomp)
+library(broom)
+
+```
+
+
+```{r}
+
+#Import data
+
+data <- read.csv("./6_extra/GLS_coumarins/data/GLS_coumarins_clean_Zulema.csv", sep = ";", header = TRUE, check.names = FALSE)
+
+str(data)
+
+#fix n.a. and numbers with "," before converting to numberic
+data[, 6:25] <- lapply(data[, 6:25], function(x) {
+  #x <- gsub("ND", 0, x)   # handle missing values
+  x <- gsub(",", ".", x)    # convert decimal comma to dot
+  as.numeric(x)
+})
+
+data[,1:5] <- lapply(data[,1:5], as.factor)
+
+str(data)#now its fine
+
+
+```
+
+#transform data
+```{r}
+#separate metadata from numeric data
+meta_cols <- 1:5
+gsl_cols  <- (max(meta_cols) + 1):ncol(data) 
+
+#add a constant to all values to fix the ND values
+gsl_data <- data[gsl_cols]
+
+min_nonzero <- min(gsl_data[gsl_data > 0], na.rm = TRUE)
+constant <- min_nonzero / 2
+
+gsl_data[is.na(gsl_data)] <- constant
+
+#log transform + pareto scaling
+gsl_log <- log10(gsl_data)
+
+pareto <- function(x) {
+  (x - mean(x)) / sqrt(sd(x))
+}
+
+gsl_pareto <- as.data.frame(apply(gsl_log, 2, pareto))
+
+#put together metadata and data
+
+data_out <- data
+data_out[gsl_cols] <- gsl_pareto
+
+#check
+data_out #ok
+```
+
+
+#Arrange data for plots
+
+```{r}
+
+data_out$Treatment <- factor(data_out$Treatment, levels=c("mock", "PsWCS417"))
+data_out$Water_regime <- factor(data_out$Water_regime, levels=c("well-watered", "drought"))
+
+```
+
+
+#Plots
+
+# Aliphatic - GLS
+
+```{r}
+#4-methylsulfinylbutyl_glucosinolate 
+
+ggplot(data_out, aes(x = Water_regime, y = `4-methylsulfinylbutyl_glucosinolate` , fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "4-methylsulfinylbutyl_glucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))   
+  
+
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_aliphatic_GLS_1.svg","Fig_SX_aliphatic_GLS_1.png"))
+
+#5-methylsulfinylpentyl_glucosinolate
+
+ggplot(data_out, aes(x = Water_regime, y = `5-methylsulfinylpentyl_glucosinolate` , fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "5-methylsulfinylpentyl_glucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_aliphatic_GLS_2.svg","Fig_SX_aliphatic_GLS_2.png"))
+
+
+#6-methylsulfinylhexyl_glucosinolate
+
+ggplot(data_out, aes(x = Water_regime, y = `6-methylsulfinylhexyl_glucosinolate` , fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "6-methylsulfinylhexyl_glucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_aliphatic_GLS_3.svg","Fig_SX_aliphatic_GLS_3.png"))
+
+
+#7-methylsulfinylheptyl_glucosinolate
+
+ggplot(data_out, aes(x = Water_regime, y = `7-methylsulfinylheptyl_glucosinolate` , fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "7-methylsulfinylheptyl_glucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_aliphatic_GLS_4.svg","Fig_SX_aliphatic_GLS_4.png"))
+
+#8-Methylsulfinyloctyl_glucosinolate
+
+ggplot(data_out, aes(x = Water_regime, y = `8-Methylsulfinyloctyl_glucosinolate` , fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "8-Methylsulfinyloctyl_glucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_aliphatic_GLS_5.svg","Fig_SX_aliphatic_GLS_5.png"))
+
+#6-methylthiohexylglucosinolate
+ggplot(data_out, aes(x = Water_regime, y = `6-methylthiohexylglucosinolate` , fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "6-methylthiohexylglucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_aliphatic_GLS_6.svg","Fig_SX_aliphatic_GLS_6.png"))
+
+#4-benzoyloxybutylglucosinolate
+ggplot(data_out, aes(x = Water_regime, y = `4-benzoyloxybutylglucosinolate` , fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "4-benzoyloxybutylglucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_aliphatic_GLS_7.svg","Fig_SX_aliphatic_GLS_7.png"))
+
+#7-methylthioheptyl_glucosinolate
+
+ggplot(data_out, aes(x = Water_regime, y = `7-methylthioheptyl_glucosinolate` , fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "7-methylthioheptyl_glucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_aliphatic_GLS_8.svg","Fig_SX_aliphatic_GLS_8.png"))
+
+#heptylglycosinolate
+
+ggplot(data_out, aes(x = Water_regime, y = heptylglycosinolate , fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "heptylglycosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_aliphatic_GLS_9.svg","Fig_SX_aliphatic_GLS_9.png"))
+
+#8-Methylthiooctyl_glucosinolate
+
+ggplot(data_out, aes(x = Water_regime, y = `8-Methylthiooctyl_glucosinolate`, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "8-Methylthiooctyl_glucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_aliphatic_GLS_10.svg","Fig_SX_aliphatic_GLS_10.png"))
+
+#2-benzoyloxy-3-butenylglucosinolate`
+
+ggplot(data_out, aes(x = Water_regime, y = `2-benzoyloxy-3-butenylglucosinolate`, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "2-benzoyloxy-3-butenylglucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_aliphatic_GLS_11.svg","Fig_SX_aliphatic_GLS_11.png"))
+```
+# Indolic - GLS
+```{r}
+#4-hydroxy-3-indolylmethyl-glucosinolate
+
+ggplot(data_out, aes(x = Water_regime, y = `4-hydroxy-3-indolylmethyl-glucosinolate`, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "4-hydroxy-3-indolylmethyl-glucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_indolic_GLS_1.svg","Fig_SX_indolic_GLS_1.png"))
+
+
+#3-indolymethyl_glucosinolate
+
+ggplot(data_out, aes(x = Water_regime, y = `3-indolymethyl_glucosinolate`, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "3-indolymethyl_glucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_indolic_GLS_2.svg","Fig_SX_indolic_GLS_2.png"))
+
+#4-methoxy-3-indolylmethyl-glucosinolate
+
+ggplot(data_out, aes(x = Water_regime, y = `4-methoxy-3-indolylmethyl-glucosinolate`, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "4-methoxy-3-indolylmethyl-glucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_indolic_GLS_3.svg","Fig_SX_indolic_GLS_3.png"))
+
+
+#1-methoxy-3-indolylmethyl-glucosinolate
+
+ggplot(data_out, aes(x = Water_regime, y = `1-methoxy-3-indolylmethyl-glucosinolate`, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "1-methoxy-3-indolylmethyl-glucosinolate") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_indolic_GLS_4.svg","Fig_SX_indolic_GLS_4.png"))
+```
+
+#Coumarins & phenylpropanoids
+```{r}
+#Unknown
+
+ggplot(data_out, aes(x = Water_regime, y = Unknown, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "Unknown") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_coumarins_1.svg","Fig_SX_coumarins_1.png"))
+
+#p-coumaric acid
+
+ggplot(data_out, aes(x = Water_regime, y = `p-coumaric acid`, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "p-coumaric acid") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_coumarins_2.svg","Fig_SX_coumarins_2.png"))
+
+#Scopoletin
+
+ggplot(data_out, aes(x = Water_regime, y = Scopoletin, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "Scopoletin") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_coumarins_3.svg","Fig_SX_coumarins_3.png"))
+
+#2-Hydroxycinnamic acid
+
+ggplot(data_out, aes(x = Water_regime, y = `2-Hydroxycinnamic acid`, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "2-Hydroxycinnamic acid") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_coumarins_4.svg","Fig_SX_coumarins_4.png"))
+
+#6,7-Dihydroxycoumarin-6-glucoside
+ggplot(data_out, aes(x = Water_regime, y = `6,7-Dihydroxycoumarin-6-glucoside`, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("AU") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(10) + 
+  theme(legend.position="top") +
+  labs(title = "6,7-Dihydroxycoumarin-6-glucoside") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        text = element_text(color = "black"), #all text in black
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(-2.5, 2.5))  
+  
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/GLS_coumarins/results",
+  scale = 1.8,
+  width = 50,
+  height = 50,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_coumarins_5.svg","Fig_SX_coumarins_5.png"))
+
+```
+

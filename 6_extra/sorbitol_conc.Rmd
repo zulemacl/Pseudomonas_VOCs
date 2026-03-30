@@ -1,0 +1,272 @@
+---
+title: "sorbitol_conc"
+author: "Zulema Carracedo Lorenzo"
+date: "2026-01-18"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+#data management
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(stringr)
+library(readxl)
+library(flextable)
+
+#statistics
+library(multcompView)
+library(vegan)
+library(pairwiseAdonis)
+library(emmeans)
+library(DHARMa) #for simmulate residuals
+library(glmmTMB) #for glmm
+library(car)
+
+#plots
+library(ggplot2)
+library(ggpattern)
+library(rempsyc) #for tables
+library(fitdistrplus)
+
+# packages needed for Cohen's D
+library(effsize)  
+library(effectsize)
+library(lsr)
+
+#for tables
+library(flextable)
+library(officer)
+library(car)
+library(emmeans)
+library(multcomp)
+
+```
+
+
+```{r}
+
+#Import data
+
+#RSA
+RSA <- read.csv("./6_extra/sorbitol_concentrations/data/WCS417April.csv", sep = ",", header = TRUE)
+RSA <- as.data.frame(RSA)
+
+str(RSA)
+RSA[,1:4] <- lapply(RSA[,1:4], as.factor)
+RSA[,5:15] <- lapply(RSA[,5:15], as.numeric)
+
+
+```
+
+
+
+#Arrange data for plots
+
+```{r}
+RSA$Media <- factor(RSA$Media, levels=c("control", "75mM", "150mM", "250mM")) 
+RSA$Treatment <- factor(RSA$Treatment, levels=c("control", "WCS417"))
+```
+
+#colors
+
+```{r}
+control <- #76CFE8
+WCS417 <- #C9DC53
+
+```
+
+#Plots
+
+```{r}
+##Total biomass
+
+ggplot(RSA, aes(x = Media, y = Total_biomass_mg, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("Total fresh weight (mg)") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(18) + 
+  #theme(legend.position="top") +
+  guides(fill= FALSE) +
+  theme(
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(0, NA))   # Force y-axis to start at 0
+  
+
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/sorbitol_concentrations/results",
+  scale = 1.8,
+  width = 150,
+  height = 100,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_A_total_FW.svg","Fig_SX_A_total_FW.png"))
+
+
+##lateral root count
+
+ggplot(RSA, aes(x = Media, y = Number_lateral_roots, fill = Treatment)) +
+  scale_fill_manual(name = "treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("Lateral root count") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(18) + 
+  #theme(legend.position="top") +
+  guides(fill= FALSE) +
+  theme(
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(0, NA))   # Force y-axis to start at 0
+
+
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/sorbitol_concentrations/results",
+  scale = 1.8,
+  width = 150,
+  height = 100,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_B_lateral_count.svg","Fig_SX_B_lateral_count.png"))
+
+
+##primary root length
+
+ggplot(RSA, aes(x = Media, y = Primary_root_length_mm, fill = Treatment)) +
+  scale_fill_manual(name = "treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("Primary root length (mm)") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(18) + 
+  #theme(legend.position="top") +
+  guides(fill= FALSE) +
+  theme(
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(0, NA))   # Force y-axis to start at 0
+
+
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/sorbitol_concentrations/results",
+  scale = 1.8,
+  width = 150,
+  height = 100,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_C_primary_root.svg","Fig_SX_C_primary_root.png"))
+```
+
+#Stats
+```{r}
+#divide data per media
+RSA_control <- filter(RSA, Media == "control")
+RSA_75mM <- filter(RSA, Media == "75mM")
+RSA_150mM <- filter(RSA, Media == "150mM")
+RSA_250mM <- filter(RSA, Media =="250mM")
+
+#Primary root length
+
+#check normality
+shapiro.test(RSA_control$Primary_root_length_mm)#normal
+shapiro.test(RSA_75mM$Primary_root_length_mm) #normal
+shapiro.test(RSA_150mM$Primary_root_length_mm) #normal
+shapiro.test(RSA_250mM$Primary_root_length_mm) #normal
+
+#check homogenity of variance
+leveneTest(Primary_root_length_mm ~ Treatment, data = RSA_control) #ok
+leveneTest(Primary_root_length_mm ~ Treatment, data = RSA_75mM) #sign
+leveneTest(Primary_root_length_mm ~ Treatment, data = RSA_150mM) #ok
+leveneTest(Primary_root_length_mm ~ Treatment, data = RSA_250mM) #ok
+
+#we can use t-test for normal distribution and wilcoxon for the rest
+t.test(Primary_root_length_mm ~ Treatment, data = RSA_control) #p-value = 6.676e-06 *** 
+wilcox.test(Primary_root_length_mm ~ Treatment, data = RSA_75mM) #p-value = 1.043e-07
+
+t.test(Primary_root_length_mm ~ Treatment, data = RSA_150mM) #p-value = 0.2982 ns
+
+t.test(Primary_root_length_mm ~ Treatment, data = RSA_250mM) #p-value = 0.1117 n.s.
+
+#Lateral root count
+
+#check normality
+shapiro.test(RSA_control$Number_lateral_roots)#normal
+shapiro.test(RSA_75mM$Number_lateral_roots) #not normal
+shapiro.test(RSA_150mM$Number_lateral_roots) #not normal
+shapiro.test(RSA_250mM$Number_lateral_roots) #not normal
+
+#check homogenity of variance
+leveneTest(Number_lateral_roots ~ Treatment, data = RSA_control) #sig
+leveneTest(Number_lateral_roots ~ Treatment, data = RSA_75mM) #ok
+leveneTest(Number_lateral_roots ~ Treatment, data = RSA_150mM) #ok
+leveneTest(Number_lateral_roots ~ Treatment, data = RSA_250mM) #ok
+
+#we can use wilcoxon 
+wilcox.test(Number_lateral_roots ~ Treatment, data = RSA_control) #p-value = 6.164e-07 
+
+wilcox.test(Number_lateral_roots ~ Treatment, data = RSA_75mM) #p-value = 2.815e-09
+
+wilcox.test(Number_lateral_roots ~ Treatment, data = RSA_150mM) #p-value = 3.174e-08
+
+wilcox.test(Number_lateral_roots ~ Treatment, data = RSA_250mM) #p-value = 9.899e-05 
+
+
+#seedlings biomass
+#check normality
+shapiro.test(RSA_control$Total_biomass_mg)#not normal
+shapiro.test(RSA_75mM$Total_biomass_mg) #not normal
+shapiro.test(RSA_150mM$Total_biomass_mg) #not normal
+shapiro.test(RSA_250mM$Total_biomass_mg) #not normal
+
+#check homogenity of variance
+leveneTest(Total_biomass_mg ~ Treatment, data = RSA_control) #sig
+leveneTest(Total_biomass_mg ~ Treatment, data = RSA_75mM) #sig
+leveneTest(Total_biomass_mg ~ Treatment, data = RSA_150mM) #sig
+leveneTest(Total_biomass_mg ~ Treatment, data = RSA_250mM) #ok
+
+#we can use wilcoxon 
+t.test(Total_biomass_mg ~ Treatment, data = RSA_control) #p-value = 1.464e-05 
+
+t.test(Total_biomass_mg ~ Treatment, data = RSA_75mM) #p-value = 8.245e-15
+
+t.test(Total_biomass_mg ~ Treatment, data = RSA_150mM) #p-value = 4.525e-12
+
+t.test(Total_biomass_mg ~ Treatment, data = RSA_250mM) #p-value = 4.022e-16
+
+
+
+
+
+```
+

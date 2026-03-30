@@ -1,0 +1,449 @@
+---
+title: "sugars"
+author: "Zulema Carracedo Lorenzo"
+date: "2026-01-20"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+#data management
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(stringr)
+library(readxl)
+library(flextable)
+
+#statistics
+library(multcompView)
+library(vegan)
+library(pairwiseAdonis)
+library(emmeans)
+library(DHARMa) #for simmulate residuals
+library(glmmTMB) #for glmm
+library(car)
+
+#plots
+library(ggplot2)
+library(ggpattern)
+library(rempsyc) #for tables
+library(fitdistrplus)
+
+# packages needed for Cohen's D
+library(effsize)  
+library(effectsize)
+library(lsr)
+
+#for tables
+library(flextable)
+library(officer)
+library(car)
+library(emmeans)
+library(multcomp)
+library(broom)
+
+```
+
+
+```{r}
+
+#Import data
+
+data <- read.csv("./6_extra/sugars/data/sugars.csv", sep = ";", header = TRUE)
+
+str(data)
+
+#fix n.a. and numbers with "," before converting to numberic
+data[, 5:10] <- lapply(data[, 5:10], function(x) {
+  x <- gsub(",", ".", x)    # convert decimal comma to dot
+  as.numeric(x)
+})
+
+data[,5:10] <- lapply(data[,5:10], as.numeric)
+data[,1:4] <- lapply(data[,1:4], as.factor)
+
+str(data)#now its fine
+
+#remove raw with NA values
+data <- subset(data, !is.na(Glucose_raw)) 
+```
+
+
+
+#Arrange data for plots
+
+```{r}
+
+data$Treatment <- factor(data$Treatment, levels=c("mock", "pseudomonas"))
+data$Water_regime <- factor(data$Water_regime, levels=c("control", "drought"))
+
+```
+
+
+#Plots
+
+```{r}
+##Glucose
+
+ggplot(data, aes(x = Water_regime, y = glu_µg.mg_FW, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("Glucose µg/mg FW") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(18) + 
+  theme(legend.position="top") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  #scale_y_continuous(limits = c(0, NA)) +  # Force y-axis to start at 0
+  facet_wrap(~ Tissue)
+
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/sugars/results",
+  scale = 1.8,
+  width = 100,
+  height = 70,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_glucose_NEW.svg","Fig_SX_glucose_NEW.png"))
+
+##Fructose
+
+ggplot(data, aes(x = Water_regime, y = fru_µg.mg_FW, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("Fructose µg/mg FW") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(18) + 
+  theme(legend.position="top") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(0, NA)) +  # Force y-axis to start at 0
+  facet_wrap(~ Tissue)
+
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/sugars/results",
+  scale = 1.8,
+  width = 100,
+  height = 70,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_fructose_NEW.svg","Fig_SX_fructose_NEW.png"))
+
+##Sucrose
+
+ggplot(data, aes(x = Water_regime, y = suc_µg.mg_FW, fill = Treatment)) +
+  scale_fill_manual(name = "Treatment", values = c("#76CFE8", "#C9DC53")) +
+  ylab("Sucrose µg/mg FW") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(), alpha=0.5, size = 2) + 
+  theme_bw(18) + 
+  theme(legend.position="top") +
+  #guides(fill= FALSE) +
+  theme(legend.position = "none", #remove legend
+        axis.title.x = element_blank(),
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  scale_y_continuous(limits = c(0, NA)) +  # Force y-axis to start at 0
+  facet_wrap(~ Tissue)
+
+
+mapply(function(x)
+  ggsave(
+  plot = last_plot(),
+  filename =x,
+  path = "./6_extra/sugars/results",
+  scale = 1.8,
+  width = 100,
+  height = 70,
+  units = "mm",
+  dpi = 300),
+x=c("Fig_SX_sucrose_NEW.svg","Fig_SX_sucrose_NEW.png"))
+
+```
+
+#Stats
+##Glucose
+```{r}
+#split into roots and shoots
+data_root <- subset(data, Tissue == "root")
+
+data_shoot <- subset(data, Tissue == "shoot")
+
+
+#Glucose
+#root
+#check normality
+# Data distribution
+aovx <- aov(glu_µg.mg_FW ~ Treatment*Water_regime, data = data_root)
+shapiro.test(aovx$residuals)#normaal
+
+hist(data_root$glu_µg.mg_FW) #normal
+
+boxplot(data_root$glu_µg.mg_FW)
+
+#check homogenity of variance
+leveneTest(glu_µg.mg_FW ~ Treatment*Water_regime, data = data_root) #no sig
+
+#we can use two-way anova
+aov_root <- aov(
+  glu_µg.mg_FW ~ Treatment * Water_regime,
+  data = data_root)
+
+summary(aov_root) #only water regime and treatment significant, but no interaction
+
+#save table
+anova_tbl <- tidy(aov_root)
+anova_tbl
+
+ft <- flextable(anova_tbl)
+ft <- autofit(ft)
+ft <- bold(ft, part = "header")
+
+doc <- read_docx()
+doc <- body_add_par(doc, "ANOVA results for glucose (roots)", style = "heading 1")
+doc <- body_add_flextable(doc, ft)
+
+print(doc, target = "ANOVA_Glucose_root_new.docx")
+
+
+#shoot
+#check normality
+# Data distribution
+
+aovx <- aov(glu_µg.mg_FW ~ Treatment*Water_regime, data = data_shoot)
+shapiro.test(aovx$residuals)#normaal
+
+hist(data_shoot$glu_µg.mg_FW) #normal
+boxplot(data_shoot$glu_µg.mg_FW)
+
+#check homogenity of variance
+leveneTest(glu_µg.mg_FW ~ Treatment*Water_regime, data = data_shoot) #no sig
+
+#we can use two-way anova
+aov_shoot <- aov(
+  glu_µg.mg_FW ~ Treatment * Water_regime,
+  data = data_shoot)
+
+summary(aov_shoot) #only water regime significant
+
+
+#save table
+anova_tbl <- tidy(aov_shoot)
+anova_tbl
+
+ft <- flextable(anova_tbl)
+ft <- autofit(ft)
+ft <- bold(ft, part = "header")
+
+doc <- read_docx()
+doc <- body_add_par(doc, "ANOVA results for glucose (shoots)", style = "heading 1")
+doc <- body_add_flextable(doc, ft)
+
+print(doc, target = "ANOVA_Glucose_shoot_new.docx")
+
+
+```
+##Fructose
+```{r}
+#Fructose
+#root
+#check normality
+# Data distribution
+aovx <- aov(fru_µg.mg_FW ~ Treatment*Water_regime, data = data_root)
+shapiro.test(aovx$residuals)#normaal
+
+hist(data_root$fru_µg.mg_FW) #normal
+boxplot(data_root$fru_µg.mg_FW)
+
+#check homogenity of variance
+leveneTest(fru_µg.mg_FW ~ Treatment*Water_regime, data = data_root) #no sig
+
+#we can use two-way anova
+aov_root <- aov(
+  fru_µg.mg_FW ~ Treatment * Water_regime,
+  data = data_root)
+
+summary(aov_root) #water regime and treatment significant, but not interaction
+
+#save table
+anova_tbl <- tidy(aov_root)
+anova_tbl
+
+ft <- flextable(anova_tbl)
+ft <- autofit(ft)
+ft <- bold(ft, part = "header")
+
+doc <- read_docx()
+doc <- body_add_par(doc, "ANOVA results for fructose (roots)", style = "heading 1")
+doc <- body_add_flextable(doc, ft)
+
+print(doc, target = "ANOVA_Fructose_root_new.docx")
+
+
+
+#shoot
+#check normality
+# Data distribution
+aovx <- aov(fru_µg.mg_FW ~ Treatment*Water_regime, data = data_shoot)
+shapiro.test(aovx$residuals)#normaal
+
+hist(data_shoot$fru_µg.mg_FW) #normal
+boxplot(data_shoot$fru_µg.mg_FW)
+
+#check homogenity of variance
+leveneTest(fru_µg.mg_FW ~ Treatment*Water_regime, data = data_shoot) #no sig
+
+#we can use two-way anova
+aov_root <- aov(
+  fru_µg.mg_FW ~ Treatment * Water_regime,
+  data = data_shoot)
+
+summary(aov_shoot) #water regime only is significant
+
+#save table
+anova_tbl <- tidy(aov_shoot)
+anova_tbl
+
+ft <- flextable(anova_tbl)
+ft <- autofit(ft)
+ft <- bold(ft, part = "header")
+
+doc <- read_docx()
+doc <- body_add_par(doc, "ANOVA results for fructose (shoots)", style = "heading 1")
+doc <- body_add_flextable(doc, ft)
+
+print(doc, target = "ANOVA_Fructose_shoot_new.docx")
+
+
+```
+
+##Sucrose
+
+```{r}
+#Sucrose
+#root
+#check normality
+# Data distribution
+aovx <- aov(suc_µg.mg_FW ~ Treatment*Water_regime, data = data_root)
+shapiro.test(aovx$residuals)#normaal
+
+hist(data_root$suc_µg.mg_FW) #normal
+
+boxplot(data_root$suc_µg.mg_FW)
+
+#check homogenity of variance
+leveneTest(suc_µg.mg_FW ~ Treatment*Water_regime, data = data_root) #no sig
+
+#we can use two-way anova
+aov_root <- aov(
+  suc_µg.mg_FW ~ Treatment * Water_regime,
+  data = data_root)
+
+summary(aov_root) #all factors + interaction are significant
+
+#save table
+anova_tbl <- tidy(aov_root)
+anova_tbl
+
+ft <- flextable(anova_tbl)
+ft <- autofit(ft)
+ft <- bold(ft, part = "header")
+
+doc <- read_docx()
+doc <- body_add_par(doc, "ANOVA results for sucrose (roots)", style = "heading 1")
+doc <- body_add_flextable(doc, ft)
+
+print(doc, target = "ANOVA_Sucrose_root_new.docx")
+
+#posthoc
+tukey_root <- TukeyHSD(aov_root)
+#emmeans
+tukey_letters <- multcompLetters4(aov_root, tukey_root)
+tukey_letters
+
+#save the posthoc table
+tukey_table <- as.data.frame(tukey_root$`Treatment:Water_regime`) #extract interaction factor group
+tukey_table$Comparison <- rownames(tukey_table)
+rownames(tukey_table) <- NULL
+
+ft <- flextable(tukey_table)
+ft <- autofit(ft)
+ft <- bold(ft, part = "header")
+
+doc <- read_docx()
+doc <- body_add_par(
+  doc,
+  "Tukey HSD post-hoc test (Sucrose, roots)",
+  style = "heading 1"
+)
+doc <- body_add_flextable(doc, ft)
+
+print(doc, target = "Tukey_posthoc_Sucrose_root_new.docx")
+
+
+#shoot
+#check normality
+# Data distribution
+
+aovx <- aov(suc_µg.mg_FW ~ Treatment*Water_regime, data = data_shoot)
+shapiro.test(aovx$residuals)#normaal
+
+hist(data_shoot$suc_µg.mg_FW) #normal
+boxplot(data_shoot$suc_µg.mg_FW)
+
+#check homogenity of variance
+leveneTest(suc_µg.mg_FW ~ Treatment*Water_regime, data = data_shoot) #close to no sig
+
+#we can use two-way anova
+aov_shoot <- aov(
+  suc_µg.mg_FW ~ Treatment * Water_regime,
+  data = data_shoot)
+
+summary(aov_shoot) #only water regime significant
+
+
+#save table
+anova_tbl <- tidy(aov_shoot)
+anova_tbl
+
+ft <- flextable(anova_tbl)
+ft <- autofit(ft)
+ft <- bold(ft, part = "header")
+
+doc <- read_docx()
+doc <- body_add_par(doc, "ANOVA results for sucrose (shoots)", style = "heading 1")
+doc <- body_add_flextable(doc, ft)
+
+print(doc, target = "ANOVA_Sucrose_shoot_new.docx")
+```
+
